@@ -35,6 +35,31 @@ export interface ProviderRow {
   catalogError?: string
 }
 
+export interface QwenRuntimeProjection {
+  connected: boolean
+  mode: 'dedicated' | 'compatible' | 'none'
+  providerId: string | null
+  models: ModelRow[]
+}
+
+/** Detect Qwen by the live model catalog, not by one preferred route name. */
+export function projectQwenRuntime(providers: ProviderRow[], dedicatedRoute = 'qwen-bailian'): QwenRuntimeProjection {
+  const candidates = providers
+    .map(provider => ({
+      provider,
+      models: provider.models.filter(model => /^qwen(?:[-_.]|$)/i.test(model.id)),
+    }))
+    .filter(candidate => candidate.models.length > 0)
+  const selected = candidates.find(candidate => candidate.provider.id === dedicatedRoute) ?? candidates[0]
+  if (!selected) return { connected: false, mode: 'none', providerId: null, models: [] }
+  return {
+    connected: true,
+    mode: selected.provider.id === dedicatedRoute ? 'dedicated' : 'compatible',
+    providerId: selected.provider.id,
+    models: selected.models,
+  }
+}
+
 export interface ModelConsoleSnapshot {
   checkedAt: number
   codex: {

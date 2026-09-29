@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { ModelConsoleSnapshot } from '../wire.ts'
+import { projectQwenRuntime, type ModelConsoleSnapshot } from '../wire.ts'
 
 const QWEN_ROUTE = 'qwen-bailian'
 const QWEN_KEY_REF = 'QWEN_BAILIAN_API_KEY'
@@ -87,8 +87,8 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNod
     () => snapshot?.providers.find(provider => provider.id === 'codex-local'),
     [snapshot],
   )
-  const qwenProvider = useMemo(
-    () => snapshot?.providers.find(provider => provider.id === QWEN_ROUTE),
+  const qwenRuntime = useMemo(
+    () => projectQwenRuntime(snapshot?.providers ?? [], QWEN_ROUTE),
     [snapshot],
   )
 
@@ -138,6 +138,11 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNod
   const providerCount = snapshot?.providers.length ?? 0
   const modelCount = snapshot?.providers.reduce((sum, provider) => sum + provider.models.length, 0) ?? 0
   const authGood = snapshot?.codex.auth.authenticated === true
+  const qwenStatus = qwenRuntime.mode === 'dedicated'
+    ? '已连接（专用路由）'
+    : qwenRuntime.mode === 'compatible'
+      ? '已连接（兼容路由）'
+      : '待配置'
 
   return (
     <section className="dmc-root">
@@ -177,18 +182,22 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNod
         <article className="dmc-card">
           <div className="dmc-row">
             <div className="dmc-logo dmc-logo-qwen">Q</div>
-            <div><div className="dmc-name">Qwen ModelStudio <span className={`dmc-badge ${qwenConfigured && qwenCredential ? 'dmc-good' : 'dmc-warn'}`}>{qwenConfigured && qwenCredential ? '已配置' : '待配置'}</span></div><div className="dmc-meta">独立 qwen-bailian 路由 · 复用 DSH 官方 llm-pi-ai</div></div>
-            <button className="dmc-btn" onClick={() => { setQwenOpen(value => !value) }}>{qwenOpen ? '收起' : '配置'}</button>
+            <div><div className="dmc-name">Qwen ModelStudio <span className={`dmc-badge ${qwenRuntime.connected ? 'dmc-good' : 'dmc-warn'}`}>{qwenStatus}</span></div><div className="dmc-meta">{qwenRuntime.connected ? `${qwenRuntime.providerId} · ${qwenRuntime.models.length} 个 Qwen 模型` : '未检测到可用 Qwen 模型'}</div></div>
+            <button className="dmc-btn" onClick={() => { setQwenOpen(value => !value) }}>{qwenOpen ? '收起' : '查看 / 配置'}</button>
           </div>
           {qwenOpen ? <div className="dmc-body">
-            <div className="dmc-callout">现有 deepseek-official/Qwen 兼容路由不会被删除；新路由验证成功后并行启用，已有会话不受影响。</div>
+            <div className="dmc-callout">{qwenRuntime.mode === 'compatible'
+              ? `当前 Qwen 已通过 ${qwenRuntime.providerId} 兼容路由正常加载。配置专用 qwen-bailian 是可选操作，不影响现有会话。`
+              : qwenRuntime.mode === 'dedicated'
+                ? '当前 Qwen 已通过专用 qwen-bailian 路由加载。'
+                : '当前运行时未发现 Qwen 模型；可在下方验证并新增专用 qwen-bailian 路由。'}</div>
+            <div className="dmc-models">{qwenRuntime.models.map(model => <span className="dmc-model" key={model.id}>{model.id}</span>)}</div>
             <div className="dmc-form" style={{ marginTop: 14 }}>
               <div className="dmc-field"><label>区域</label><select className="dmc-select" value={region} onChange={event => { setRegion(event.target.value as Region) }}><option value="cn">中国（北京）</option><option value="sg">新加坡</option><option value="us">美国（弗吉尼亚）</option></select></div>
               <div className="dmc-field"><label>API Endpoint</label><input className="dmc-input" readOnly value={QWEN_ENDPOINTS[region]} /></div>
               <div className="dmc-field"><label>API Key（只写；已保存值不会回显）</label><input className="dmc-input" type="password" autoComplete="new-password" value={apiKey} placeholder={qwenCredential ? '已配置；留空保持原值' : '首次配置需要输入'} onChange={event => { setApiKey(event.target.value) }} /></div>
               <div className="dmc-actions"><button className="dmc-btn dmc-primary" disabled={saving || !qwenWritable} onClick={() => { void configureQwen() }}>{saving ? '验证并保存中…' : '验证并保存'}</button></div>
               {message ? <p className={message.includes('saved') ? 'dmc-success' : 'dmc-error'}>{message}</p> : null}
-              <div className="dmc-models">{(qwenProvider?.models ?? []).map(model => <span className="dmc-model" key={model.id}>{model.id}</span>)}</div>
             </div>
           </div> : null}
         </article>

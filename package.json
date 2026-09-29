@@ -1,6 +1,6 @@
 {
   "name": "dsh-model-console",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A truthful model control surface for DeepSeek Harness: live providers, local Codex authentication, and safe Qwen configuration.",
   "type": "module",
   "main": "./lib/index.js",
