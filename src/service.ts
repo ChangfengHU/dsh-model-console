@@ -8,6 +8,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { parseCodexLoginStatus, parseCodexVersion } from './auth.ts'
 import type { ModelConsoleSnapshot, ProviderRow } from './wire.ts'
 
@@ -41,7 +42,7 @@ export async function resolveCodexExecutable(configured: string): Promise<string
 
 /** Remote service backing the Settings section. */
 export class ModelConsoleService extends TypertRemoteService {
-  static inject = ['llm']
+  static inject = ['llm', 'agentDefaultModel']
 
   constructor(ctx: Context, private readonly options: ServiceOptions) {
     super(ctx, 'modelConsole')
@@ -94,8 +95,77 @@ export class ModelConsoleService extends TypertRemoteService {
         providerActive: providers.some(provider => provider.id === 'codex-local'),
         ...(diagnostic === undefined ? {} : { diagnostic }),
       },
+      defaultModel: this.ctx.agentDefaultModel.currentSelection(),
       providers,
     }
     return JSON.stringify(snapshot)
+  }
+
+  async testModel(payload: string): Promise<string> {
+    const input = JSON.parse(payload) as { provider?: unknown; model?: unknown }
+    const provider = typeof input.provider === 'string' ? input.provider.trim() : ''
+    const model = typeof input.model === 'string' ? input.model.trim() : ''
+    if (!provider || !model) throw new Error('provider and model are required')
+    if (!this.ctx.llm.listProviders().some(item => item.id === provider)) throw new Error(`provider is not registered: ${provider}`)
+
+    const startedAt = Date.now()
+    const controller = new AbortController()
+    const timer = setTimeout(() => { controller.abort() }, 30_000)
+    let firstTokenAt: number | undefined
+    let textSeen = false
+    let failure: { code: string; message: string } | undefined
+    try {
+      for await (const chunk of this.ctx.llm.stream({
+        provider,
+        model,
+        messages: [createUserMessage({
+          content: [{ type: 'text', text: 'Reply with exactly: OK' }],
+          source: { kind: 'plugin', plugin: 'dsh-model-console' },
+        })],
+        system: 'This is a connectivity test. Follow the user instruction exactly.',
+        tools: [],
+        signal: controller.signal,
+      })) {
+        if (chunk.type === 'text-delta' && chunk.text.length > 0) {
+          firstTokenAt ??= Date.now()
+          textSeen = true
+        }
+        if (chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
+          failure = {
+            code: chunk.reason.failure.code,
+            message: chunk.reason.failure.message.slice(0, 300),
+          }
+        }
+      }
+    } catch (cause) {
+      failure = {
+        code: 'TEST_FAILED',
+        message: (cause instanceof Error ? cause.message : String(cause)).slice(0, 300),
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+    const testedAt = Date.now()
+    return JSON.stringify({
+      ok: failure === undefined && textSeen,
+      provider,
+      model,
+      testedAt,
+      durationMs: testedAt - startedAt,
+      ...(firstTokenAt === undefined ? {} : { firstTokenMs: firstTokenAt - startedAt }),
+      ...(failure === undefined && textSeen ? {} : failure ?? { code: 'EMPTY_RESPONSE', message: 'Model returned no text' }),
+    })
+  }
+
+  async saveDefault(payload: string): Promise<string> {
+    const input = JSON.parse(payload) as { provider?: unknown; model?: unknown }
+    const provider = typeof input.provider === 'string' ? input.provider.trim() : ''
+    const model = typeof input.model === 'string' ? input.model.trim() : ''
+    if (!provider || !model) throw new Error('provider and model are required')
+    if (!this.ctx.llm.listProviders().some(item => item.id === provider)) throw new Error(`provider is not registered: ${provider}`)
+    const models = await this.ctx.llm.listModels(provider)
+    if (!models.some(item => item.id === model)) throw new Error(`model is not in the current runtime catalog: ${provider}/${model}`)
+    await this.ctx.agentDefaultModel.saveSelection({ provider, model })
+    return JSON.stringify(this.ctx.agentDefaultModel.currentSelection())
   }
 }

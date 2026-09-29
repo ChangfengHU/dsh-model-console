@@ -16,6 +16,14 @@ export async function apply(ctx: any): Promise<void> {
       const result = await ctx.get('remote.modelConsole').snapshot()
       return JSON.parse(unwrap<string>(result)) as ModelConsoleSnapshot
     },
+    testModel: async (provider, model) => {
+      const result = await ctx.get('remote.modelConsole').testModel(JSON.stringify({ provider, model }))
+      return JSON.parse(unwrap<string>(result))
+    },
+    saveDefault: async (provider, model) => {
+      const result = await ctx.get('remote.modelConsole').saveDefault(JSON.stringify({ provider, model }))
+      return JSON.parse(unwrap<string>(result))
+    },
     standard: ctx.get('connection').api,
   }
   ctx.slots.inject('settings.section', () => ctx.slots.register({

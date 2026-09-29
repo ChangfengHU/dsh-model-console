@@ -3,9 +3,11 @@ import test from 'node:test'
 import { CONSOLE_INVOCATIONS, METHODS, PKG, projectQwenRuntime } from '../src/wire.ts'
 
 test('host and client share one stable model-console invocation list', () => {
-  assert.deepEqual(CONSOLE_INVOCATIONS.map(item => item.method), [...METHODS])
+  assert.deepEqual(CONSOLE_INVOCATIONS.map(item => item.method), METHODS.map(([method]) => method))
   assert.equal(CONSOLE_INVOCATIONS[0]?.id, `${PKG}#modelConsole/snapshot`)
   assert.equal(CONSOLE_INVOCATIONS[0]?.namespace, 'modelConsole')
+  assert.equal(CONSOLE_INVOCATIONS[1]?.parameters.length, 1)
+  assert.equal(CONSOLE_INVOCATIONS[2]?.parameters.length, 1)
 })
 
 test('recognizes Qwen models on an existing compatible provider', () => {

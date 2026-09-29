@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { projectQwenRuntime, type ModelConsoleSnapshot } from '../wire.ts'
+import { projectQwenRuntime, type ModelConsoleSnapshot, type ModelTestResult } from '../wire.ts'
 
 const QWEN_ROUTE = 'qwen-bailian'
 const QWEN_KEY_REF = 'QWEN_BAILIAN_API_KEY'
@@ -29,6 +29,8 @@ interface StandardApi {
 
 export interface ModelConsoleApi {
   snapshot(): Promise<ModelConsoleSnapshot>
+  testModel(provider: string, model: string): Promise<ModelTestResult>
+  saveDefault(provider: string, model: string): Promise<ModelConsoleSnapshot['defaultModel']>
   standard: StandardApi
 }
 
@@ -41,6 +43,13 @@ function asObject(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {}
+}
+
+function formatTestTime(value: number): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(new Date(value))
 }
 
 export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNode {
@@ -56,6 +65,11 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNod
   const [qwenWritable, setQwenWritable] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [defaultValue, setDefaultValue] = useState('')
+  const [defaultSaving, setDefaultSaving] = useState(false)
+  const [defaultMessage, setDefaultMessage] = useState<string | null>(null)
+  const [testing, setTesting] = useState<string | null>(null)
+  const [testResults, setTestResults] = useState<Record<string, ModelTestResult>>({})
 
   const refresh = async (): Promise<void> => {
     setLoading(true)
@@ -70,6 +84,7 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNod
       const namespace = settings.namespaces.find(item => item.ns === 'llm-pi-ai')
       const providers = asObject(asObject(namespace?.value).providers)
       setSnapshot(next)
+      setDefaultValue(`${next.defaultModel.provider}\u0000${next.defaultModel.model}`)
       setQwenConfigured(asObject(providers[QWEN_ROUTE]).baseURL !== undefined)
       const credentialState = valueOf(credential).credentials[QWEN_KEY_REF]
       setQwenCredential(credentialState?.configured === true)
@@ -143,6 +158,51 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNod
     : qwenRuntime.mode === 'compatible'
       ? '已连接（兼容路由）'
       : '待配置'
+  const modelChoices = snapshot?.providers.flatMap(provider => provider.models.map(model => `${provider.id}\u0000${model.id}`)) ?? []
+  const codexTestModel = snapshot?.defaultModel.provider === 'codex-local'
+    ? snapshot.defaultModel.model
+    : codexProvider?.models[0]?.id
+  const qwenTestModel = qwenRuntime.models[0]?.id
+
+  const runTest = async (provider: string, model: string): Promise<void> => {
+    const key = `${provider}/${model}`
+    setTesting(key)
+    try {
+      const result = await api.testModel(provider, model)
+      setTestResults(current => ({ ...current, [provider]: result }))
+    } catch (cause) {
+      setTestResults(current => ({ ...current, [provider]: {
+        ok: false, provider, model, testedAt: Date.now(), durationMs: 0,
+        code: 'REQUEST_FAILED', message: cause instanceof Error ? cause.message : String(cause),
+      } }))
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const saveDefault = async (): Promise<void> => {
+    const [provider, model] = defaultValue.split('\u0000')
+    if (!provider || !model) return
+    setDefaultSaving(true)
+    setDefaultMessage(null)
+    try {
+      const saved = await api.saveDefault(provider, model)
+      setDefaultMessage(`已保存：${saved.provider}/${saved.model}；仅影响之后新建的会话。`)
+      await refresh()
+    } catch (cause) {
+      setDefaultMessage(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setDefaultSaving(false)
+    }
+  }
+
+  const testLine = (provider: string): ReactNode => {
+    const result = testResults[provider]
+    if (!result) return null
+    return <p className={result.ok ? 'dmc-success' : 'dmc-error'}>{result.ok
+      ? `测试通过 · ${result.model} · 首字 ${result.firstTokenMs ?? '—'}ms · 总耗时 ${result.durationMs}ms · ${formatTestTime(result.testedAt)}（北京时间）`
+      : `测试失败 · ${result.code ?? 'UNKNOWN'} · ${result.message ?? '未知错误'} · ${formatTestTime(result.testedAt)}（北京时间）`}</p>
+  }
 
   return (
     <section className="dmc-root">
@@ -160,13 +220,27 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNod
           <div><small>本机 Codex</small><strong>{authGood ? '已认证' : '需要检查'}</strong></div>
         </div>
 
+        <div className="dmc-section-title">新会话默认模型</div>
+        <article className="dmc-card dmc-default-card">
+          <div>
+            <div className="dmc-name">新建 Session 默认使用</div>
+            <div className="dmc-meta">现有会话保持各自选择，不会被修改。</div>
+          </div>
+          <select className="dmc-select" value={defaultValue} onChange={event => { setDefaultValue(event.target.value); setDefaultMessage(null) }}>
+            {snapshot?.defaultModel && !modelChoices.includes(defaultValue) ? <option value={defaultValue}>{snapshot.defaultModel.provider} / {snapshot.defaultModel.model}（当前配置）</option> : null}
+            {snapshot?.providers.map(provider => <optgroup label={provider.name} key={provider.id}>{provider.models.map(model => <option value={`${provider.id}\u0000${model.id}`} key={`${provider.id}/${model.id}`}>{model.name} · {model.id}</option>)}</optgroup>)}</select>
+          <button className="dmc-btn dmc-primary" disabled={loading || defaultSaving || !defaultValue || defaultValue === `${snapshot?.defaultModel.provider}\u0000${snapshot?.defaultModel.model}`} onClick={() => { void saveDefault() }}>{defaultSaving ? '保存中…' : '设为默认'}</button>
+          {defaultMessage ? <p className={defaultMessage.startsWith('已保存') ? 'dmc-success' : 'dmc-error'}>{defaultMessage}</p> : null}
+        </article>
+
         <div className="dmc-section-title">本机与 API Provider</div>
         <article className="dmc-card">
           <div className="dmc-row">
             <div className="dmc-logo dmc-logo-codex">C</div>
             <div><div className="dmc-name">Codex App Server <span className={`dmc-badge ${authGood && snapshot?.codex.providerActive ? 'dmc-good' : 'dmc-warn'}`}>{authGood && snapshot?.codex.providerActive ? '已连接' : '需处理'}</span></div><div className="dmc-meta">复用机器本地 Codex CLI 认证 · Provider: codex-local</div></div>
-            <button className="dmc-btn" onClick={() => { setCodexOpen(value => !value) }}>{codexOpen ? '收起' : '查看'}</button>
+            <div className="dmc-row-actions"><button className="dmc-btn" disabled={!codexTestModel || testing !== null} onClick={() => { if (codexTestModel) void runTest('codex-local', codexTestModel) }}>{testing === `codex-local/${codexTestModel}` ? '测试中…' : '测试'}</button><button className="dmc-btn" onClick={() => { setCodexOpen(value => !value) }}>{codexOpen ? '收起' : '查看'}</button></div>
           </div>
+          {testLine('codex-local')}
           {codexOpen && snapshot ? <div className="dmc-body">
             <div className="dmc-grid">
               <div className="dmc-fact"><small>Codex CLI</small><b>{snapshot.codex.installed ? `已安装${snapshot.codex.version ? ` · ${snapshot.codex.version}` : ''}` : '未安装'}</b></div>
@@ -183,8 +257,9 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNod
           <div className="dmc-row">
             <div className="dmc-logo dmc-logo-qwen">Q</div>
             <div><div className="dmc-name">Qwen ModelStudio <span className={`dmc-badge ${qwenRuntime.connected ? 'dmc-good' : 'dmc-warn'}`}>{qwenStatus}</span></div><div className="dmc-meta">{qwenRuntime.connected ? `${qwenRuntime.providerId} · ${qwenRuntime.models.length} 个 Qwen 模型` : '未检测到可用 Qwen 模型'}</div></div>
-            <button className="dmc-btn" onClick={() => { setQwenOpen(value => !value) }}>{qwenOpen ? '收起' : '查看 / 配置'}</button>
+            <div className="dmc-row-actions"><button className="dmc-btn" disabled={!qwenRuntime.providerId || !qwenTestModel || testing !== null} onClick={() => { if (qwenRuntime.providerId && qwenTestModel) void runTest(qwenRuntime.providerId, qwenTestModel) }}>{testing === `${qwenRuntime.providerId}/${qwenTestModel}` ? '测试中…' : '测试'}</button><button className="dmc-btn" onClick={() => { setQwenOpen(value => !value) }}>{qwenOpen ? '收起' : '查看 / 配置'}</button></div>
           </div>
+          {qwenRuntime.providerId ? testLine(qwenRuntime.providerId) : null}
           {qwenOpen ? <div className="dmc-body">
             <div className="dmc-callout">{qwenRuntime.mode === 'compatible'
               ? `当前 Qwen 已通过 ${qwenRuntime.providerId} 兼容路由正常加载。配置专用 qwen-bailian 是可选操作，不影响现有会话。`

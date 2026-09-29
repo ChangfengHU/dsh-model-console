@@ -3,7 +3,16 @@
 import { z } from 'zod'
 
 export const PKG = 'dsh-model-console'
-export const METHODS = ['snapshot'] as const
+export const METHODS = [['snapshot', 0], ['testModel', 1], ['saveDefault', 1]] as const
+
+function jsonParam(name: string) {
+  return Object.freeze({
+    name,
+    wire: name,
+    source: 'json',
+    codec: Object.freeze({ mode: 'strict', typeSymbol: `${PKG}/types#Json`, schema: z.string() }),
+  })
+}
 
 const JSON_RESULT = Object.freeze({
   mode: 'strict',
@@ -11,13 +20,13 @@ const JSON_RESULT = Object.freeze({
   schema: z.string(),
 })
 
-export const CONSOLE_INVOCATIONS = Object.freeze(METHODS.map(method => Object.freeze({
+export const CONSOLE_INVOCATIONS = Object.freeze(METHODS.map(([method, argc]) => Object.freeze({
   id: `${PKG}#modelConsole/${method}`,
   service: 'modelConsole',
   namespace: 'modelConsole',
   method,
   invocation: Object.freeze({ kind: 'direct' }),
-  parameters: Object.freeze([]),
+  parameters: Object.freeze(argc === 1 ? [jsonParam('payload')] : []),
   result: JSON_RESULT,
   sourceLocation: Object.freeze({ file: 'src/wire.ts', line: 1, column: 1 }),
 })))
@@ -70,5 +79,21 @@ export interface ModelConsoleSnapshot {
     providerActive: boolean
     diagnostic?: string
   }
+  defaultModel: {
+    provider: string
+    model: string
+    reasoningEffort?: string
+  }
   providers: ProviderRow[]
+}
+
+export interface ModelTestResult {
+  ok: boolean
+  provider: string
+  model: string
+  testedAt: number
+  durationMs: number
+  firstTokenMs?: number
+  code?: string
+  message?: string
 }

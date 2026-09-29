@@ -5,7 +5,7 @@ import z from '@deepseek-ai/schemastery'
 import { ModelConsoleService } from './service.ts'
 
 export const name = 'model-console'
-export const inject = ['llm']
+export const inject = ['llm', 'agentDefaultModel']
 
 export interface Config {
   codexExecutable?: string
@@ -26,4 +26,4 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 export { parseCodexLoginStatus, parseCodexVersion } from './auth.ts'
 export { ModelConsoleService, resolveCodexExecutable } from './service.ts'
 export { CONSOLE_INVOCATIONS, METHODS, PKG } from './wire.ts'
-export type { ModelConsoleSnapshot, ModelRow, ProviderRow } from './wire.ts'
+export type { ModelConsoleSnapshot, ModelRow, ModelTestResult, ProviderRow } from './wire.ts'
