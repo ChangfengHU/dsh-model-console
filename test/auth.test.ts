@@ -4,7 +4,9 @@ import { parseCodexLoginStatus, parseCodexVersion } from '../src/auth.ts'
 
 test('recognizes local ChatGPT authentication without returning credentials', () => {
   assert.deepEqual(parseCodexLoginStatus('Logged in using ChatGPT'), {
-    kind: 'chatgpt', label: 'ChatGPT account', authenticated: true,
+    kind: 'chatgpt',
+    label: 'ChatGPT account',
+    authenticated: true,
   })
 })
 

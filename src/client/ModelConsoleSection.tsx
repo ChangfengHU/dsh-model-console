@@ -1,286 +1,411 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { projectQwenRuntime, type ModelConsoleSnapshot, type ModelTestResult } from '../wire.ts'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ModelConsoleSnapshot, ModelTestResult } from '../wire.ts'
+import {
+  choiceKey,
+  choiceFor,
+  effortOf,
+  projectModels,
+  selectChoice,
+  sourceKind,
+  sourceName,
+  type Selection,
+} from '../catalog.ts'
+import type { ModelConsoleApi } from './api.ts'
+import { errorText, timeText, valueOf } from './api.ts'
+import { DefaultPanel } from './DefaultPanel.tsx'
+import { SourcesPanel } from './SourcesPanel.tsx'
+export type { ModelConsoleApi } from './api.ts'
 
-const QWEN_ROUTE = 'qwen-bailian'
-const QWEN_KEY_REF = 'QWEN_BAILIAN_API_KEY'
-const QWEN_ENDPOINTS = {
-  cn: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  sg: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-  us: 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
-} as const
-
-type Region = keyof typeof QWEN_ENDPOINTS
-
-interface RpcResult<T> { result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } } }
-interface StandardApi {
-  llm: {
-    providers(payload: {}): Promise<RpcResult<{ providers: Array<{ provider: string; active: boolean }> }>>
-    discoverModels(payload: Record<string, unknown>): Promise<RpcResult<{ models: Array<{ id: string }> }>>
-  }
-  settings: {
-    describe(payload: {}): Promise<RpcResult<{ writable: boolean; namespaces: Array<{ ns: string; value: unknown; user?: unknown; revision: number }> }>>
-    mutate(payload: Record<string, unknown>): Promise<RpcResult<{ revision: number }>>
-  }
-  credentials: {
-    describe(payload: { refs: string[] }): Promise<RpcResult<{ credentials: Record<string, { configured: boolean; writable: boolean; source?: string }> }>>
-    set(payload: { ref: string; value: string }): Promise<RpcResult<{}>>
-  }
-}
-
-export interface ModelConsoleApi {
-  snapshot(): Promise<ModelConsoleSnapshot>
-  testModel(provider: string, model: string): Promise<ModelTestResult>
-  saveDefault(provider: string, model: string): Promise<ModelConsoleSnapshot['defaultModel']>
-  standard: StandardApi
-}
-
-function valueOf<T>(result: RpcResult<T>): T {
-  if (!result.result.ok) throw new Error(result.result.error.message)
-  return result.result.value
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
-}
-
-function formatTestTime(value: number): string {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).format(new Date(value))
-}
-
-export function ModelConsoleSection({ api }: { api: ModelConsoleApi }): ReactNode {
+export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
   const [snapshot, setSnapshot] = useState<ModelConsoleSnapshot | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [codexOpen, setCodexOpen] = useState(false)
-  const [qwenOpen, setQwenOpen] = useState(false)
-  const [region, setRegion] = useState<Region>('cn')
-  const [apiKey, setApiKey] = useState('')
-  const [qwenConfigured, setQwenConfigured] = useState(false)
-  const [qwenCredential, setQwenCredential] = useState(false)
-  const [qwenWritable, setQwenWritable] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-  const [defaultValue, setDefaultValue] = useState('')
-  const [defaultSaving, setDefaultSaving] = useState(false)
-  const [defaultMessage, setDefaultMessage] = useState<string | null>(null)
-  const [testing, setTesting] = useState<string | null>(null)
-  const [testResults, setTestResults] = useState<Record<string, ModelTestResult>>({})
-
-  const refresh = async (): Promise<void> => {
+  const [tab, setTab] = useState('catalog'),
+    [source, setSource] = useState(''),
+    [view, setView] = useState('core'),
+    [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true),
+    [error, setError] = useState(''),
+    [dirty, setDirty] = useState(false),
+    [staged, setStaged] = useState<Selection | null>(null)
+  const [choices, setChoices] = useState<Record<string, Selection>>({}),
+    [tests, setTests] = useState<Record<string, ModelTestResult>>({})
+  const [testing, setTesting] = useState(''),
+    [favoriting, setFavoriting] = useState(false)
+  const generation = useRef(0),
+    testBusy = useRef(false),
+    favoriteBusy = useRef(false)
+  const refresh = useCallback(async () => {
+    const run = ++generation.current
     setLoading(true)
-    setError(null)
+    setError('')
     try {
-      const [next, described, credential] = await Promise.all([
-        api.snapshot(),
-        api.standard.settings.describe({}),
-        api.standard.credentials.describe({ refs: [QWEN_KEY_REF] }),
-      ])
-      const settings = valueOf(described)
-      const namespace = settings.namespaces.find(item => item.ns === 'llm-pi-ai')
-      const providers = asObject(asObject(namespace?.value).providers)
-      setSnapshot(next)
-      setDefaultValue(`${next.defaultModel.provider}\u0000${next.defaultModel.model}`)
-      setQwenConfigured(asObject(providers[QWEN_ROUTE]).baseURL !== undefined)
-      const credentialState = valueOf(credential).credentials[QWEN_KEY_REF]
-      setQwenCredential(credentialState?.configured === true)
-      setQwenWritable(settings.writable && credentialState?.writable !== false && namespace !== undefined)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { void refresh() }, [])
-
-  const codexProvider = useMemo(
-    () => snapshot?.providers.find(provider => provider.id === 'codex-local'),
-    [snapshot],
-  )
-  const qwenRuntime = useMemo(
-    () => projectQwenRuntime(snapshot?.providers ?? [], QWEN_ROUTE),
-    [snapshot],
-  )
-
-  const configureQwen = async (): Promise<void> => {
-    setSaving(true)
-    setMessage(null)
-    try {
-      if (!qwenWritable) throw new Error('DSH settings or credentials are read-only')
-      if (!qwenCredential && apiKey.trim().length === 0) throw new Error('First-time setup needs an API key')
-      const endpoint = QWEN_ENDPOINTS[region]
-      const describe = valueOf(await api.standard.settings.describe({}))
-      const namespace = describe.namespaces.find(item => item.ns === 'llm-pi-ai')
-      if (!namespace) throw new Error('llm-pi-ai is not installed')
-      const probe = valueOf(await api.standard.llm.discoverModels({
-        settingsNs: 'llm-pi-ai',
-        ...(qwenConfigured ? { provider: QWEN_ROUTE } : { baseURL: endpoint, api: 'openai-completions' }),
-        ...(apiKey.trim().length === 0 ? {} : { apiKey: apiKey.trim() }),
-      }))
-      if (probe.models.length === 0) throw new Error('Qwen returned an empty model catalog')
-      const profile = {
-        displayName: 'Qwen ModelStudio',
-        apiKeyEnv: QWEN_KEY_REF,
-        api: 'openai-completions',
-        baseURL: endpoint,
-        models: [
-          { id: 'qwen-plus-latest', name: 'Qwen Plus Latest', contextWindow: 131072, maxTokens: 32768, input: ['text'] },
-          { id: 'qwen-flash', name: 'Qwen Flash', contextWindow: 1000000, maxTokens: 32768, input: ['text'] },
-        ],
+      const next = await api.snapshot()
+      if (run === generation.current) {
+        setSnapshot(next)
+        setSource((current) =>
+          next.providers.some((p) => p.id === current)
+            ? current
+            : next.defaultModel.provider || next.providers[0]?.id || '',
+        )
       }
-      const write = await api.standard.settings.mutate({
-        ns: 'llm-pi-ai',
-        ops: [{ op: 'set', path: ['providers', QWEN_ROUTE], value: profile }],
-        expectedRevision: namespace.revision,
-      })
-      valueOf(write)
-      if (apiKey.trim().length > 0) valueOf(await api.standard.credentials.set({ ref: QWEN_KEY_REF, value: apiKey.trim() }))
-      setApiKey('')
-      setMessage('Qwen configuration and credential were verified and saved.')
-      await refresh()
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : String(cause))
+      if (run === generation.current) setError(errorText(cause))
     } finally {
-      setSaving(false)
+      if (run === generation.current) setLoading(false)
     }
-  }
-
-  const providerCount = snapshot?.providers.length ?? 0
-  const modelCount = snapshot?.providers.reduce((sum, provider) => sum + provider.models.length, 0) ?? 0
-  const authGood = snapshot?.codex.auth.authenticated === true
-  const qwenStatus = qwenRuntime.mode === 'dedicated'
-    ? '已连接（专用路由）'
-    : qwenRuntime.mode === 'compatible'
-      ? '已连接（兼容路由）'
-      : '待配置'
-  const modelChoices = snapshot?.providers.flatMap(provider => provider.models.map(model => `${provider.id}\u0000${model.id}`)) ?? []
-  const codexTestModel = snapshot?.defaultModel.provider === 'codex-local'
-    ? snapshot.defaultModel.model
-    : codexProvider?.models[0]?.id
-  const qwenTestModel = qwenRuntime.models[0]?.id
-
-  const runTest = async (provider: string, model: string): Promise<void> => {
-    const key = `${provider}/${model}`
+  }, [api])
+  useEffect(() => {
+    void refresh()
+    return () => {
+      generation.current++
+    }
+  }, [refresh])
+  const refreshAfterSave = useCallback(async () => {
+    setTests({})
+    await refresh()
+  }, [refresh])
+  const test = async (selection: Selection) => {
+    if (testBusy.current) return
+    const key = JSON.stringify(selection)
+    testBusy.current = true
     setTesting(key)
     try {
-      const result = await api.testModel(provider, model)
-      setTestResults(current => ({ ...current, [provider]: result }))
+      const result = await api.testModel(selection)
+      setTests((current) => ({ ...current, [key]: result }))
     } catch (cause) {
-      setTestResults(current => ({ ...current, [provider]: {
-        ok: false, provider, model, testedAt: Date.now(), durationMs: 0,
-        code: 'REQUEST_FAILED', message: cause instanceof Error ? cause.message : String(cause),
-      } }))
+      setTests((current) => ({
+        ...current,
+        [key]: {
+          ...selection,
+          ok: false,
+          code: 'REQUEST_FAILED',
+          message: errorText(cause),
+          testedAt: Date.now(),
+          durationMs: 0,
+        },
+      }))
     } finally {
-      setTesting(null)
+      testBusy.current = false
+      setTesting('')
     }
   }
-
-  const saveDefault = async (): Promise<void> => {
-    const [provider, model] = defaultValue.split('\u0000')
-    if (!provider || !model) return
-    setDefaultSaving(true)
-    setDefaultMessage(null)
+  const favorite = async (key: string) => {
+    if (!snapshot || favoriteBusy.current) return
+    favoriteBusy.current = true
+    setFavoriting(true)
+    setError('')
     try {
-      const saved = await api.saveDefault(provider, model)
-      setDefaultMessage(`已保存：${saved.provider}/${saved.model}；仅影响之后新建的会话。`)
-      await refresh()
+      const next = snapshot.preferences.favoriteModels.includes(key)
+        ? snapshot.preferences.favoriteModels.filter((k) => k !== key)
+        : [...snapshot.preferences.favoriteModels, key]
+      valueOf(
+        await api.standard.settings.mutate({
+          ns: 'model-console',
+          expectedRevision: snapshot.preferences.revision,
+          ops: [{ op: 'set', path: ['favoriteModels'], value: next }],
+        }),
+      )
+      const after = valueOf(await api.standard.settings.describe({})).namespaces.find(
+        (n) => n.ns === 'model-console',
+      )
+      if (JSON.stringify(after?.value.favoriteModels) !== JSON.stringify(next))
+        throw new Error('收藏保存未确认，请刷新后重试')
+      setSnapshot((current) =>
+        current
+          ? {
+              ...current,
+              preferences: {
+                ...current.preferences,
+                favoriteModels: next,
+                revision: after!.revision,
+              },
+            }
+          : current,
+      )
     } catch (cause) {
-      setDefaultMessage(cause instanceof Error ? cause.message : String(cause))
+      setError(errorText(cause))
     } finally {
-      setDefaultSaving(false)
+      favoriteBusy.current = false
+      setFavoriting(false)
     }
   }
-
-  const testLine = (provider: string): ReactNode => {
-    const result = testResults[provider]
-    if (!result) return null
-    return <p className={result.ok ? 'dmc-success' : 'dmc-error'}>{result.ok
-      ? `测试通过 · ${result.model} · 首字 ${result.firstTokenMs ?? '—'}ms · 总耗时 ${result.durationMs}ms · ${formatTestTime(result.testedAt)}（北京时间）`
-      : `测试失败 · ${result.code ?? 'UNKNOWN'} · ${result.message ?? '未知错误'} · ${formatTestTime(result.testedAt)}（北京时间）`}</p>
-  }
-
+  const provider = snapshot?.providers.find((p) => p.id === source)
+  const rows = provider ? projectModels(provider) : []
+  const pinned =
+    provider && snapshot?.defaultModel.provider === provider.id
+      ? choiceFor(provider, snapshot.defaultModel)?.id
+      : undefined
+  const visible = rows.filter(
+    (row) =>
+      (view === 'all' ||
+        row.id === pinned ||
+        (view === 'favorites'
+          ? snapshot?.preferences.favoriteModels.includes(choiceKey(source, row.id))
+          : row.core ||
+            snapshot?.preferences.favoriteModels.includes(choiceKey(source, row.id)))) &&
+      (row.name + ' ' + row.id).toLowerCase().includes(search.toLowerCase()),
+  )
+  const rawCount = snapshot?.providers.reduce((n, p) => n + p.models.length, 0) ?? 0
+  const coreCount = new Set(
+    snapshot?.providers.flatMap((p) =>
+      projectModels(p)
+        .filter((r) => r.core)
+        .map((r) => (sourceKind(p) === '账号池 API' ? 'ag/' + r.id : p.id + '/' + r.id)),
+    ),
+  ).size
   return (
     <section className="dmc-root">
-      <div className="dmc-wrap">
-        <header className="dmc-head">
-          <div><h2>Model Console</h2><p>真实运行时、机器本地认证和安全 Provider 配置。</p></div>
-          <button className="dmc-btn" disabled={loading} onClick={() => { void refresh() }}>
-            {loading ? <><span className="dmc-spinner" /> 刷新中</> : '刷新状态'}
-          </button>
-        </header>
-        {error ? <p className="dmc-error">{error}</p> : null}
-        <div className="dmc-summary">
-          <div><small>实际 Provider</small><strong>{providerCount} 个已注册</strong></div>
-          <div><small>实际模型</small><strong>{modelCount} 个可发现</strong></div>
-          <div><small>本机 Codex</small><strong>{authGood ? '已认证' : '需要检查'}</strong></div>
+      <header className="dmc-head">
+        <div>
+          <div className="dmc-eyebrow">模型管理</div>
+          <h2>Model Console</h2>
+          <p className="dmc-muted">统一管理接入来源、常用模型和新会话默认设置。</p>
         </div>
-
-        <div className="dmc-section-title">新会话默认模型</div>
-        <article className="dmc-card dmc-default-card">
-          <div>
-            <div className="dmc-name">新建 Session 默认使用</div>
-            <div className="dmc-meta">现有会话保持各自选择，不会被修改。</div>
-          </div>
-          <select className="dmc-select" value={defaultValue} onChange={event => { setDefaultValue(event.target.value); setDefaultMessage(null) }}>
-            {snapshot?.defaultModel && !modelChoices.includes(defaultValue) ? <option value={defaultValue}>{snapshot.defaultModel.provider} / {snapshot.defaultModel.model}（当前配置）</option> : null}
-            {snapshot?.providers.map(provider => <optgroup label={provider.name} key={provider.id}>{provider.models.map(model => <option value={`${provider.id}\u0000${model.id}`} key={`${provider.id}/${model.id}`}>{model.name} · {model.id}</option>)}</optgroup>)}</select>
-          <button className="dmc-btn dmc-primary" disabled={loading || defaultSaving || !defaultValue || defaultValue === `${snapshot?.defaultModel.provider}\u0000${snapshot?.defaultModel.model}`} onClick={() => { void saveDefault() }}>{defaultSaving ? '保存中…' : '设为默认'}</button>
-          {defaultMessage ? <p className={defaultMessage.startsWith('已保存') ? 'dmc-success' : 'dmc-error'}>{defaultMessage}</p> : null}
-        </article>
-
-        <div className="dmc-section-title">本机与 API Provider</div>
-        <article className="dmc-card">
-          <div className="dmc-row">
-            <div className="dmc-logo dmc-logo-codex">C</div>
-            <div><div className="dmc-name">Codex App Server <span className={`dmc-badge ${authGood && snapshot?.codex.providerActive ? 'dmc-good' : 'dmc-warn'}`}>{authGood && snapshot?.codex.providerActive ? '已连接' : '需处理'}</span></div><div className="dmc-meta">复用机器本地 Codex CLI 认证 · Provider: codex-local</div></div>
-            <div className="dmc-row-actions"><button className="dmc-btn" disabled={!codexTestModel || testing !== null} onClick={() => { if (codexTestModel) void runTest('codex-local', codexTestModel) }}>{testing === `codex-local/${codexTestModel}` ? '测试中…' : '测试'}</button><button className="dmc-btn" onClick={() => { setCodexOpen(value => !value) }}>{codexOpen ? '收起' : '查看'}</button></div>
-          </div>
-          {testLine('codex-local')}
-          {codexOpen && snapshot ? <div className="dmc-body">
-            <div className="dmc-grid">
-              <div className="dmc-fact"><small>Codex CLI</small><b>{snapshot.codex.installed ? `已安装${snapshot.codex.version ? ` · ${snapshot.codex.version}` : ''}` : '未安装'}</b></div>
-              <div className="dmc-fact"><small>本机认证</small><b>{snapshot.codex.auth.label}</b></div>
-              <div className="dmc-fact"><small>DSH Provider</small><b>{snapshot.codex.providerActive ? 'codex-local 已注册' : '未注册'}</b></div>
-              <div className="dmc-fact"><small>认证处理</small><b>由 Codex CLI 管理；本页不读取 Token</b></div>
-            </div>
-            {snapshot.codex.diagnostic ? <p className="dmc-error">{snapshot.codex.diagnostic}</p> : null}
-            <div className="dmc-models">{(codexProvider?.models ?? []).map(model => <span className="dmc-model" key={model.id}>{model.id}</span>)}</div>
-          </div> : null}
-        </article>
-
-        <article className="dmc-card">
-          <div className="dmc-row">
-            <div className="dmc-logo dmc-logo-qwen">Q</div>
-            <div><div className="dmc-name">Qwen ModelStudio <span className={`dmc-badge ${qwenRuntime.connected ? 'dmc-good' : 'dmc-warn'}`}>{qwenStatus}</span></div><div className="dmc-meta">{qwenRuntime.connected ? `${qwenRuntime.providerId} · ${qwenRuntime.models.length} 个 Qwen 模型` : '未检测到可用 Qwen 模型'}</div></div>
-            <div className="dmc-row-actions"><button className="dmc-btn" disabled={!qwenRuntime.providerId || !qwenTestModel || testing !== null} onClick={() => { if (qwenRuntime.providerId && qwenTestModel) void runTest(qwenRuntime.providerId, qwenTestModel) }}>{testing === `${qwenRuntime.providerId}/${qwenTestModel}` ? '测试中…' : '测试'}</button><button className="dmc-btn" onClick={() => { setQwenOpen(value => !value) }}>{qwenOpen ? '收起' : '查看 / 配置'}</button></div>
-          </div>
-          {qwenRuntime.providerId ? testLine(qwenRuntime.providerId) : null}
-          {qwenOpen ? <div className="dmc-body">
-            <div className="dmc-callout">{qwenRuntime.mode === 'compatible'
-              ? `当前 Qwen 已通过 ${qwenRuntime.providerId} 兼容路由正常加载。配置专用 qwen-bailian 是可选操作，不影响现有会话。`
-              : qwenRuntime.mode === 'dedicated'
-                ? '当前 Qwen 已通过专用 qwen-bailian 路由加载。'
-                : '当前运行时未发现 Qwen 模型；可在下方验证并新增专用 qwen-bailian 路由。'}</div>
-            <div className="dmc-models">{qwenRuntime.models.map(model => <span className="dmc-model" key={model.id}>{model.id}</span>)}</div>
-            <div className="dmc-form" style={{ marginTop: 14 }}>
-              <div className="dmc-field"><label>区域</label><select className="dmc-select" value={region} onChange={event => { setRegion(event.target.value as Region) }}><option value="cn">中国（北京）</option><option value="sg">新加坡</option><option value="us">美国（弗吉尼亚）</option></select></div>
-              <div className="dmc-field"><label>API Endpoint</label><input className="dmc-input" readOnly value={QWEN_ENDPOINTS[region]} /></div>
-              <div className="dmc-field"><label>API Key（只写；已保存值不会回显）</label><input className="dmc-input" type="password" autoComplete="new-password" value={apiKey} placeholder={qwenCredential ? '已配置；留空保持原值' : '首次配置需要输入'} onChange={event => { setApiKey(event.target.value) }} /></div>
-              <div className="dmc-actions"><button className="dmc-btn dmc-primary" disabled={saving || !qwenWritable} onClick={() => { void configureQwen() }}>{saving ? '验证并保存中…' : '验证并保存'}</button></div>
-              {message ? <p className={message.includes('saved') ? 'dmc-success' : 'dmc-error'}>{message}</p> : null}
-            </div>
-          </div> : null}
-        </article>
-
-        <div className="dmc-section-title">全部运行时 Provider</div>
-        <div className="dmc-provider-list">{(snapshot?.providers ?? []).map(provider => <div className="dmc-provider" key={provider.id}><b>{provider.name}</b><small>{provider.id} · {provider.models.length} models{provider.catalogError ? ` · ${provider.catalogError}` : ''}</small></div>)}</div>
-        <p className="dmc-foot">原生 Models 页面继续负责通用 Provider 编辑和会话模型选择。本控制台不重复注册 codex-local，不读取 OAuth Token，也不会因 MCP、Tool 或业务验收失败自动切换模型。</p>
+        <button disabled={loading} onClick={() => void refresh()}>
+          {loading ? '刷新中…' : '刷新状态'}
+        </button>
+      </header>
+      {error ? (
+        <p className="dmc-error" role="alert">
+          {error}{' '}
+          <button className="dmc-link" onClick={() => void refresh()}>
+            重试刷新
+          </button>
+        </p>
+      ) : null}
+      <div className="dmc-summary">
+        <div>
+          <strong>3</strong>
+          <small>接入方式</small>
+        </div>
+        <div>
+          <strong>{snapshot?.providers.length ?? '—'}</strong>
+          <small>接入来源</small>
+        </div>
+        <div>
+          <strong>{coreCount || '—'}</strong>
+          <small>核心型号 · 池目录去重</small>
+        </div>
+        <div>
+          <strong>{rawCount || '—'}</strong>
+          <small>原始条目 · 含档位</small>
+        </div>
       </div>
+      <div className="dmc-tabs" role="tablist" aria-label="模型管理页面">
+        {[
+          ['catalog', '模型目录'],
+          ['sources', '接入来源'],
+          ['default', '默认设置'],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            id={'dmc-tab-' + id}
+            aria-controls={'dmc-panel-' + id}
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+          >
+            {label}
+            {id === 'default' && dirty ? ' · 未保存' : ''}
+          </button>
+        ))}
+      </div>
+      {!snapshot ? (
+        <p className="dmc-muted" role="status">
+          {loading ? '正在读取模型目录和本机状态…' : '状态读取失败，请重试刷新。'}
+        </p>
+      ) : (
+        <>
+          <div
+            hidden={tab !== 'catalog'}
+            role="tabpanel"
+            id="dmc-panel-catalog"
+            aria-labelledby="dmc-tab-catalog"
+          >
+            <div className="dmc-toolbar">
+              <label className="dmc-field">
+                接入来源
+                <select
+                  aria-label="接入来源"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                >
+                  {snapshot.providers.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {sourceName(p)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="dmc-field">
+                搜索模型
+                <input
+                  placeholder="模型名称或 ID"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="dmc-filter-row">
+              <div className="dmc-filters" aria-label="目录筛选">
+                {[
+                  ['core', '常用'],
+                  ['favorites', '收藏'],
+                  ['all', '全部模型'],
+                ].map(([id, label]) => (
+                  <button key={id} aria-pressed={view === id} onClick={() => setView(id)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="dmc-muted">
+                {visible.length} 个型号 / {provider?.models.length ?? 0} 个原始条目
+              </span>
+            </div>
+            {provider?.id === 'codex-local' ? (
+              <p className="dmc-muted">按本机 Codex 目录顺序展示；常用页保留前四个模型，收藏和当前默认值也会保留。</p>
+            ) : null}
+            {snapshot.defaultModel.provider === source &&
+            provider &&
+            !choiceFor(provider, snapshot.defaultModel) ? (
+              <p className="dmc-callout">
+                当前默认值仍保留：{snapshot.defaultModel.model}（不在已加载目录中）
+              </p>
+            ) : null}
+            {provider?.catalogError ? <p className="dmc-error">{provider.catalogError}</p> : null}
+            <div className="dmc-model-list">
+              {visible.map((row) => {
+                const key = choiceKey(source, row.id)
+                const selection =
+                  choices[key] ??
+                  (pinned === row.id ? snapshot.defaultModel : selectChoice(source, row))
+                const result = tests[JSON.stringify(selection)],
+                  starred = snapshot.preferences.favoriteModels.includes(key)
+                return (
+                  <article className="dmc-card dmc-model-card" key={key}>
+                    <div className="dmc-model-heading">
+                      <div>
+                        <b>{row.name}</b>
+                        <div className="dmc-muted">
+                          {row.id}
+                          {pinned === row.id ? ' · 新会话默认' : ''}
+                        </div>
+                      </div>
+                      <button
+                        className="dmc-star"
+                        aria-label={(starred ? '取消收藏 ' : '收藏 ') + row.name}
+                        aria-pressed={starred}
+                        disabled={favoriting || !snapshot.preferences.writable}
+                        onClick={() => void favorite(key)}
+                      >
+                        {starred ? '★' : '☆'}
+                      </button>
+                    </div>
+                    <div className="dmc-model-controls">
+                      {row.efforts.length ? (
+                        <label className="dmc-effort">
+                          推理档位
+                          <select
+                            aria-label="推理档位"
+                            value={effortOf(row, selection)}
+                            onChange={(e) =>
+                              setChoices((current) => ({
+                                ...current,
+                                [key]: selectChoice(source, row, e.target.value),
+                              }))
+                            }
+                          >
+                            {!row.suffixEfforts ? <option value="">模型默认</option> : null}
+                            {row.efforts.map((e) => (
+                              <option key={e.id} value={e.id}>
+                                {e.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <span className="dmc-muted">使用模型默认档位</span>
+                      )}
+                      <div className="dmc-actions">
+                        <button disabled={!!testing} onClick={() => void test(selection)}>
+                          {testing === JSON.stringify(selection) ? '测试中…' : '测试模型'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setStaged({ ...selection })
+                            setTab('default')
+                          }}
+                        >
+                          设为默认…
+                        </button>
+                      </div>
+                    </div>
+                    {result ? (
+                      <p className={result.ok ? 'dmc-success' : 'dmc-error'} role="status">
+                        {result.ok
+                          ? '实测通过 · 首字 ' +
+                            (result.firstTokenMs ?? '—') +
+                            'ms · 总耗时 ' +
+                            result.durationMs +
+                            'ms'
+                          : '测试失败 · ' + result.code + ' · ' + result.message}{' '}
+                        · {timeText(result.testedAt)}
+                        <br />
+                        <small>
+                          测试目标：{result.provider} / {result.model}
+                          {result.reasoningEffort ? ' · ' + result.reasoningEffort : ''}
+                        </small>
+                      </p>
+                    ) : null}
+                  </article>
+                )
+              })}
+            </div>
+            {!visible.length ? (
+              <p className="dmc-empty">没有匹配的模型。尝试“全部模型”或其他来源。</p>
+            ) : null}
+            <p className="dmc-muted">
+              测试发送一次短请求，不创建聊天会话。结果只代表该来源与型号在测试时间的响应；额度以账号池管理为准。
+            </p>
+          </div>
+          <div
+            hidden={tab !== 'sources'}
+            role="tabpanel"
+            id="dmc-panel-sources"
+            aria-labelledby="dmc-tab-sources"
+          >
+            <SourcesPanel
+              api={api}
+              snapshot={snapshot}
+              onSaved={refreshAfterSave}
+              tests={Object.values(tests)}
+              testing={!!testing}
+              onTest={(id) => {
+                setSource(id)
+                setTab('catalog')
+                setView('core')
+                setSearch('')
+              }}
+            />
+          </div>
+          <div
+            hidden={tab !== 'default'}
+            role="tabpanel"
+            id="dmc-panel-default"
+            aria-labelledby="dmc-tab-default"
+          >
+            <DefaultPanel
+              api={api}
+              snapshot={snapshot}
+              staged={staged}
+              onSaved={refresh}
+              onDirty={setDirty}
+            />
+          </div>
+          <footer className="dmc-muted dmc-footer">
+            状态更新于 {timeText(snapshot.checkedAt)} · 时间按浏览器本地时区显示
+          </footer>
+        </>
+      )}
     </section>
   )
 }

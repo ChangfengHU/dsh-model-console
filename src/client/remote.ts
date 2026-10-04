@@ -5,7 +5,11 @@ export const MODEL_CONSOLE_REMOTE = Object.freeze({
   descriptors: CONSOLE_INVOCATIONS,
 })
 
-export function unwrap<T>(result: { ok: boolean; value?: T; error?: { code: string; message: string } }): T {
+export function unwrap<T>(result: {
+  ok: boolean
+  value?: T
+  error?: { code: string; message: string }
+}): T {
   if (!result.ok) throw new Error(result.error?.message ?? 'Model Console request failed')
   return result.value as T
 }
