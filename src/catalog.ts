@@ -27,13 +27,21 @@ export function sourceKind(provider: ProviderRow): '本机登录' | '直接 API'
 }
 export function sourceName(provider: ProviderRow): string {
   return provider.id === 'codex-local'
-    ? 'Codex · 本机登录'
+    ? 'Codex'
     : provider.id === 'claude-local'
-      ? 'Claude Code · 本机登录'
+      ? 'Claude Code'
       : provider.name
 }
 const label = (id: string): string =>
-  ({ low: '低', medium: '中', high: '高', xhigh: '更高', max: '最大', ultra: '最高' })[id] ?? id
+  ({ low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' })[id] ?? id
+
+export function selectionLabel(provider: ProviderRow | undefined, selection: Selection | null): string {
+  if (!selection) return 'Select model'
+  const name = (provider ? choiceFor(provider, selection)?.name : undefined) ?? selection.model
+  const model = selection.model === 'default' ? 'Default' : name.replace(/^Claude\s+/i, '').replace(/\s*\(recommended\)\s*$/i, '')
+  const source = provider?.id === 'claude-local' ? 'Claude' : provider ? sourceName(provider) : selection.provider
+  return source + ' · ' + model
+}
 const numeric = (id: string): number[] => [...id.matchAll(/\d+/g)].map((m) => Number(m[0]))
 function newer(a: string, b: string): number {
   const x = numeric(a),

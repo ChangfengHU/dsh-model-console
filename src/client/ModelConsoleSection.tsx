@@ -99,7 +99,7 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
         : [...snapshot.preferences.favoriteModels, key]
       const after = await api.saveFavorites(next, snapshot.preferences.revision)
       if (JSON.stringify(after.favoriteModels) !== JSON.stringify(next))
-        throw new Error('收藏保存未确认，请刷新后重试')
+        throw new Error('Favorite save was not confirmed')
       setSnapshot((current) =>
         current
           ? {
@@ -147,26 +147,26 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
     <section className="dmc-root">
       <header className="dmc-head">
         <div>
-          <div className="dmc-eyebrow">模型管理</div>
+          <div className="dmc-eyebrow">Native CLI models</div>
           <h2>Model Console</h2>
         </div>
         <button disabled={loading} onClick={() => void refresh()}>
-          {loading ? '刷新中…' : '刷新状态'}
+          {loading ? 'Refreshing…' : 'Refresh'}
         </button>
       </header>
       {error ? (
         <p className="dmc-error" role="alert">
           {error}{' '}
           <button className="dmc-link" onClick={() => void refresh()}>
-            重试刷新
+            Retry
           </button>
         </p>
       ) : null}
-      <div className="dmc-tabs" role="tablist" aria-label="模型管理页面">
+      <div className="dmc-tabs" role="tablist" aria-label="Model management">
         {[
-          ['catalog', '模型目录'],
-          ['sources', '接入来源'],
-          ['default', '默认设置'],
+          ['catalog', 'Models'],
+          ['sources', 'Sources'],
+          ['default', 'Defaults'],
         ].map(([id, label]) => (
           <button
             key={id}
@@ -177,13 +177,13 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
             onClick={() => setTab(id)}
           >
             {label}
-            {id === 'default' && dirty ? ' · 未保存' : ''}
+            {id === 'default' && dirty ? ' · Unsaved' : ''}
           </button>
         ))}
       </div>
       {!snapshot ? (
         <p className="dmc-muted" role="status">
-          {loading ? '正在读取模型目录和本机状态…' : '状态读取失败，请重试刷新。'}
+          {loading ? 'Loading catalogs and local sign-in status…' : 'Could not load status. Try again.'}
         </p>
       ) : (
         <>
@@ -195,9 +195,9 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
           >
             <div className="dmc-toolbar">
               <label className="dmc-field">
-                接入来源
+                Sources
                 <select
-                  aria-label="接入来源"
+                  aria-label="Sources"
                   value={source}
                   onChange={(e) => setSource(e.target.value)}
                 >
@@ -209,20 +209,20 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
                 </select>
               </label>
               <label className="dmc-field">
-                搜索模型
+                Search models
                 <input
-                  placeholder="模型名称或 ID"
+                  placeholder="Model name or ID"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </label>
             </div>
             <div className="dmc-filter-row">
-              <div className="dmc-filters" aria-label="目录筛选">
+              <div className="dmc-filters" aria-label="Catalog filter">
                 {[
-                  ['core', '常用'],
-                  ['favorites', '收藏'],
-                  ['all', '全部模型'],
+                  ['core', 'Popular'],
+                  ['favorites', 'Favorites'],
+                  ['all', 'All models'],
                 ].map(([id, label]) => (
                   <button key={id} aria-pressed={view === id} onClick={() => setView(id)}>
                     {label}
@@ -230,17 +230,14 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
                 ))}
               </div>
               <span className="dmc-muted">
-                {visible.length} 个型号 / {provider?.models.length ?? 0} 个原始条目
+                {visible.length} models / {provider?.models.length ?? 0} catalog entries
               </span>
             </div>
-            {provider?.id === 'codex-local' ? (
-              <p className="dmc-muted">按本机 Codex 目录顺序展示；常用页保留前四个模型，收藏和当前默认值也会保留。</p>
-            ) : null}
             {snapshot.defaultModel.provider === source &&
             provider &&
             !choiceFor(provider, snapshot.defaultModel) ? (
               <p className="dmc-callout">
-                当前默认值仍保留：{snapshot.defaultModel.model}（不在已加载目录中）
+                Saved default retained: {snapshot.defaultModel.model} (Not in catalog)
               </p>
             ) : null}
             {provider?.catalogError ? <p className="dmc-error">{provider.catalogError}</p> : null}
@@ -259,12 +256,12 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
                         <b>{row.name}</b>
                         <div className="dmc-muted">
                           {row.id}
-                          {pinned === row.id ? ' · 新会话默认' : ''}
+                          {pinned === row.id ? ' · New-session default' : ''}
                         </div>
                       </div>
                       <button
                         className="dmc-star"
-                        aria-label={(starred ? '取消收藏 ' : '收藏 ') + row.name}
+                        aria-label={(starred ? 'Unfavorite ' : 'Favorite ') + row.name}
                         aria-pressed={starred}
                         disabled={favoriting || !snapshot.preferences.writable}
                         onClick={() => void favorite(key)}
@@ -275,9 +272,9 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
                     <div className="dmc-model-controls">
                       {row.efforts.length ? (
                         <label className="dmc-effort">
-                          推理档位
+                          Reasoning effort
                           <select
-                            aria-label="推理档位"
+                            aria-label="Reasoning effort"
                             value={effortOf(row, selection)}
                             onChange={(e) =>
                               setChoices((current) => ({
@@ -286,7 +283,7 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
                               }))
                             }
                           >
-                            {!row.suffixEfforts ? <option value="">模型默认</option> : null}
+                            {!row.suffixEfforts ? <option value="">Model default</option> : null}
                             {row.efforts.map((e) => (
                               <option key={e.id} value={e.id}>
                                 {e.name}
@@ -295,11 +292,11 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
                           </select>
                         </label>
                       ) : (
-                        <span className="dmc-muted">使用模型默认档位</span>
+                        <span className="dmc-muted">Model default effort</span>
                       )}
                       <div className="dmc-actions">
                         <button disabled={!!testing} onClick={() => void test(selection)}>
-                          {testing === JSON.stringify(selection) ? '测试中…' : '测试模型'}
+                          {testing === JSON.stringify(selection) ? 'Testing…' : 'Test'}
                         </button>
                         <button
                           onClick={() => {
@@ -307,23 +304,23 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
                             setTab('default')
                           }}
                         >
-                          设为默认…
+                          Set default…
                         </button>
                       </div>
                     </div>
                     {result ? (
                       <p className={result.ok ? 'dmc-success' : 'dmc-error'} role="status">
                         {result.ok
-                          ? '实测通过 · 首字 ' +
+                          ? 'Passed · First token ' +
                             (result.firstTokenMs ?? '—') +
-                            'ms · 总耗时 ' +
+                            'ms · Total ' +
                             result.durationMs +
                             'ms'
-                          : '测试失败 · ' + result.code + ' · ' + result.message}{' '}
+                          : 'Failed · ' + result.code + ' · ' + result.message}{' '}
                         · {timeText(result.testedAt)}
                         <br />
                         <small>
-                          测试目标：{result.provider} / {result.model}
+                          Tested: {result.provider} / {result.model}
                           {result.reasoningEffort ? ' · ' + result.reasoningEffort : ''}
                         </small>
                       </p>
@@ -333,11 +330,8 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
               })}
             </div>
             {!visible.length ? (
-              <p className="dmc-empty">没有匹配的模型。尝试“全部模型”或其他来源。</p>
+              <p className="dmc-empty">No matching models</p>
             ) : null}
-            <p className="dmc-muted">
-              测试发送一次短请求，不创建聊天会话。结果只代表该来源与型号在测试时间的响应；额度以账号池管理为准。
-            </p>
           </div>
           <div
             hidden={tab !== 'sources'}
@@ -374,7 +368,7 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
             />
           </div>
           <footer className="dmc-muted dmc-footer">
-            状态更新于 {timeText(snapshot.checkedAt)} · 时间按浏览器本地时区显示
+            Checked {timeText(snapshot.checkedAt)} · Browser local time
           </footer>
         </>
       )}

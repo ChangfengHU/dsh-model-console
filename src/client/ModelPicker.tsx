@@ -7,10 +7,11 @@ import {
   projectModels,
   selectChoice,
   sourceName,
+  selectionLabel,
   type Selection,
 } from '../catalog.ts'
 import type { ProviderRow } from '../wire.ts'
-import { valueOf, type ModelConsoleApi } from './api.ts'
+import type { ModelConsoleApi } from './api.ts'
 
 export function ModelPicker({
   locked,
@@ -105,14 +106,8 @@ export function ModelPicker({
     setSearch('')
     setOpen(true)
     load()
-    void api.standard.settings
-      .describe({})
-      .then((result) => {
-        setFavorites(
-          valueOf(result).namespaces.find((n) => n.ns === 'model-console')?.value.favoriteModels ??
-            [],
-        )
-      })
+    void api.snapshot()
+      .then(result => setFavorites(result.preferences.favoriteModels))
       .catch(() => {})
   }
   const apply = async () => {
@@ -120,20 +115,19 @@ export function ModelPicker({
     if (await select(draft)) {
       setOpen(false)
       root.current?.querySelector('button')?.focus()
-    } else setFailure(directory.getSnapshot().error ?? '切换失败，请重试')
+    } else setFailure(directory.getSnapshot().error ?? 'Model switch failed. Try again.')
   }
   if (!available) return null
   return (
     <div className="dmc-picker" ref={root}>
       <button
         disabled={locked || busy}
-        aria-label="选择当前会话模型"
+        aria-label="Select session model"
+        title={current ? [owner ? sourceName(owner) : current.provider, current.model, effortLabel].filter(Boolean).join(' / ') : 'Select session model'}
         aria-expanded={open}
         onClick={show}
       >
-        {owner ? sourceName(owner) + ' · ' : ''}
-        {active?.name ?? current?.model ?? '选择模型'}
-        {effortLabel ? ' · ' + effortLabel : ''} ▾
+        {selectionLabel(owner, current)} ▾
       </button>
       {open
         ? createPortal(
@@ -143,7 +137,7 @@ export function ModelPicker({
                 ref={panel}
                 style={{ position: 'fixed', ...position }}
                 role="dialog"
-                aria-label="选择当前会话模型"
+                aria-label="Select session model"
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') {
                     setOpen(false)
@@ -151,13 +145,13 @@ export function ModelPicker({
                   }
                 }}
               >
-                <h3>当前会话模型</h3>
-                <p className="dmc-muted">切换只影响当前会话；新会话默认值在 Model Console 保存。</p>
+                <h3>Session model</h3>
+                <p className="dmc-muted">Changes apply to this session only.</p>
                 <div className="dmc-fields">
                   <label className="dmc-field">
-                    接入来源
+                    Source
                     <select
-                      aria-label="接入来源"
+                      aria-label="Source"
                       value={draft?.provider ?? ''}
                       disabled={busy}
                       onChange={(e) => {
@@ -168,7 +162,7 @@ export function ModelPicker({
                       }}
                     >
                       {draft && !provider ? (
-                        <option value={draft.provider}>{draft.provider}（当前选择）</option>
+                        <option value={draft.provider}>{draft.provider} (Current)</option>
                       ) : null}
                       {providers.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -178,17 +172,17 @@ export function ModelPicker({
                     </select>
                   </label>
                   <input
-                    aria-label="搜索会话模型"
-                    placeholder="搜索名称或 ID"
+                    aria-label="Search session models"
+                    placeholder="Search name or ID"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
                 </div>
                 <div className="dmc-filters">
                   {[
-                    ['core', '常用'],
-                    ['favorites', '收藏'],
-                    ['all', '全部'],
+                    ['core', 'Popular'],
+                    ['favorites', 'Favorites'],
+                    ['all', 'All'],
                   ].map(([id, label]) => (
                     <button key={id} aria-pressed={view === id} onClick={() => setView(id)}>
                       {label}
@@ -216,21 +210,21 @@ export function ModelPicker({
                   ))}
                 </div>
                 {draft && !row ? (
-                  <p className="dmc-muted">保留当前目录外的选择：{draft.model}</p>
+                  <p className="dmc-muted">Current selection outside catalog: {draft.model}</p>
                 ) : null}
                 {!rows.length ? (
-                  <p className="dmc-muted">目录无匹配项；可切换来源、清空搜索或查看全部。</p>
+                  <p className="dmc-muted">No matching models</p>
                 ) : null}
                 {row?.efforts.length && draft ? (
                   <label className="dmc-field">
-                    推理档位
+                    Reasoning effort
                     <select
-                      aria-label="推理档位"
+                      aria-label="Reasoning effort"
                       value={effortOf(row, draft)}
                       disabled={busy}
                       onChange={(e) => setDraft(selectChoice(provider!.id, row, e.target.value))}
                     >
-                      {!row.suffixEfforts ? <option value="">模型默认</option> : null}
+                      {!row.suffixEfforts ? <option value="">Model default</option> : null}
                       {row.efforts.map((e) => (
                         <option key={e.id} value={e.id}>
                           {e.name}
@@ -246,19 +240,19 @@ export function ModelPicker({
                 ) : null}
                 {state.failures.length ? (
                   <p className="dmc-muted">
-                    {state.failures.length} 个来源目录加载失败；其他来源可继续选择。
+                    {state.failures.length} source catalogs failed to load
                   </p>
                 ) : null}
                 <div className="dmc-actions">
                   <button disabled={busy || state.status === 'loading'} onClick={load}>
-                    {state.status === 'loading' ? '刷新中…' : '刷新目录'}
+                    {state.status === 'loading' ? 'Refreshing…' : 'Refresh catalog'}
                   </button>
                   <button
                     className="dmc-primary"
                     disabled={!draft || busy || locked}
                     onClick={() => void apply()}
                   >
-                    {busy ? '切换中…' : '应用到当前会话'}
+                    {busy ? 'Switching…' : 'Apply'}
                   </button>
                 </div>
               </div>

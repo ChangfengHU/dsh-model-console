@@ -18,9 +18,9 @@ export function ModelFields({
   return (
     <fieldset className="dmc-fields" disabled={disabled}>
       <label className="dmc-field">
-        接入来源
+        Source
         <select
-          aria-label="接入来源"
+          aria-label="Source"
           value={value.provider}
           onChange={(e) => {
             const p = providers.find((p) => p.id === e.target.value)!
@@ -28,7 +28,7 @@ export function ModelFields({
             if (match) onChange(selectChoice(p.id, match, row ? effortOf(row, value) : undefined))
           }}
         >
-          {!provider ? <option value={value.provider}>{value.provider}（当前配置）</option> : null}
+          {!provider ? <option value={value.provider}>{value.provider} (Saved)</option> : null}
           {providers.map((p) => (
             <option key={p.id} value={p.id}>
               {sourceName(p)}
@@ -37,28 +37,28 @@ export function ModelFields({
         </select>
       </label>
       <label className="dmc-field">
-        模型
+        Model
         <select
-          aria-label="模型"
+          aria-label="Model"
           value={row?.id ?? value.model}
           onChange={(e) => {
             const r = rows.find((r) => r.id === e.target.value)!
             onChange(selectChoice(value.provider, r))
           }}
         >
-          {!row ? <option value={value.model}>{value.model}（当前目录外）</option> : null}
+          {!row ? <option value={value.model}>{value.model} (Not in catalog)</option> : null}
           {rows.map((r) => (
             <option key={r.id} value={r.id}>
               {r.name}
-              {r.core ? '' : ' · 更多型号'}
+              {r.core ? '' : ' · More'}
             </option>
           ))}
         </select>
       </label>
       <label className="dmc-field">
-        推理档位
+        Reasoning effort
         <select
-          aria-label="推理档位"
+          aria-label="Reasoning effort"
           disabled={!row?.efforts.length}
           value={row ? effortOf(row, value) : (value.reasoningEffort ?? '')}
           onChange={(e) => {
@@ -66,10 +66,10 @@ export function ModelFields({
           }}
         >
           {!row?.efforts.length ? (
-            <option value={value.reasoningEffort ?? ''}>模型默认</option>
+            <option value={value.reasoningEffort ?? ''}>Model default</option>
           ) : (
             <>
-              {!row.suffixEfforts ? <option value="">模型默认</option> : null}
+              {!row.suffixEfforts ? <option value="">Model default</option> : null}
               {row.efforts.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.name}

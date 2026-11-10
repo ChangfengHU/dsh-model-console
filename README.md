@@ -34,6 +34,10 @@ The channel follows DSH's trusted-host admission and same-origin rules. Trusted-
 
 ## Native CLI Models
 
+The English-language picker uses compact labels such as `Claude · Default`.
+Hovering shows the exact source, model and effort; the expanded picker retains
+the complete catalog. Closed labels do not change the real model selection.
+
 The local catalog and source tabs show Codex/Claude only. The native source check uses the companion package's exported Codex executable resolver when available, then the user's local CLI fallback. Explicit executable configuration is respected.
 
 Installed, logged in, catalog loaded and inference tested are separate facts. A model appearing in a local cache does not prove that the account can invoke it. Claude's JSON auth status is parsed from stdout without combining diagnostic stderr into the JSON.

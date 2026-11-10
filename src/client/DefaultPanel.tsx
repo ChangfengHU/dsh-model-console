@@ -89,7 +89,7 @@ export function DefaultPanel({
       const saved = await api.saveDefault(draft, revision)
       setDraft(saved.selection)
       setRevision(saved.revision)
-      setMessage('已保存并确认 · ' + timeText(saved.savedAt))
+      setMessage('Saved and confirmed · ' + timeText(saved.savedAt))
       try {
         sessionStorage.removeItem(DRAFT_KEY)
       } catch {}
@@ -110,7 +110,7 @@ export function DefaultPanel({
       const current = await api.snapshot()
       setRevision(current.defaultState.revision)
       await onSaved().catch(() => {})
-      setMessage('已刷新保存版本；草稿保留，请核对后再次保存')
+      setMessage('Revision refreshed; your draft is retained')
     } catch (cause) {
       setMessage(errorText(cause))
     } finally {
@@ -122,7 +122,7 @@ export function DefaultPanel({
   return (
     <div>
       <div className="dmc-saved">
-        <small>已保存 · 新会话默认值</small>
+        <small>Saved · New-session default</small>
         <b>
           {p ? sourceName(p) : snapshot.defaultModel.provider} /{' '}
           {p
@@ -136,7 +136,7 @@ export function DefaultPanel({
             : ''}
         </span>
       </div>
-      <h3>新的默认选择</h3>
+      <h3>Default selection</h3>
       <ModelFields
         providers={snapshot.providers}
         value={draft}
@@ -148,14 +148,14 @@ export function DefaultPanel({
         }}
       />
       <p className="dmc-muted">
-        精确模型 ID：{draft.model}
-        {draft.reasoningEffort ? ' · 推理 ' + draft.reasoningEffort : ''}
+        Exact model ID: {draft.model}
+        {draft.reasoningEffort ? ' · Effort: ' + draft.reasoningEffort : ''}
       </p>
       <p className="dmc-muted">
-        仅影响之后新建的会话。已有会话保留自己的选择；Agent 预设指定模型时按预设执行。
+        Applies to new sessions. Existing sessions and agent-specific model choices are unchanged.
       </p>
       {!snapshot.defaultState.writable ? (
-        <p className="dmc-error">设置服务只读，无法保存默认模型。</p>
+        <p className="dmc-error">Settings are read-only.</p>
       ) : null}
       <div className="dmc-savebar">
         <div
@@ -163,18 +163,18 @@ export function DefaultPanel({
           aria-live="polite"
           className={failed ? 'dmc-error' : dirty ? 'dmc-pending' : 'dmc-success'}
         >
-          {saving ? '保存中…' : message || (dirty ? '有未保存的修改' : '默认设置已保存')}
+          {saving ? 'Saving…' : message || (dirty ? 'Unsaved changes' : 'Default saved')}
         </div>
         <div className="dmc-actions">
           <button disabled={!dirty || saving} onClick={cancel}>
-            取消修改
+            Discard changes
           </button>
           <button
             className="dmc-primary"
             disabled={!dirty || saving || !snapshot.defaultState.writable}
             onClick={() => void save()}
           >
-            {saving ? '保存中…' : failed ? '重试保存' : '保存默认设置'}
+            {saving ? 'Saving…' : failed ? 'Retry save' : 'Save default'}
           </button>
         </div>
       </div>
@@ -184,7 +184,7 @@ export function DefaultPanel({
           disabled={saving}
           onClick={() => void refreshRevision()}
         >
-          刷新保存版本，保留草稿
+          Refresh revision
         </button>
       ) : null}
     </div>
