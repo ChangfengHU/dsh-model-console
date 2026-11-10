@@ -2,6 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { CONSOLE_INVOCATIONS, METHODS, PKG, projectQwenRuntime } from '../src/wire.ts'
 
+test('compact wire codecs preserve strict string validation for every invocation', () => {
+  for (const invocation of CONSOLE_INVOCATIONS) {
+    assert.equal(invocation.result.schema.parse('{"ok":true}'), '{"ok":true}')
+    assert.equal(invocation.result.schema.safeParse({ ok: true }).success, false)
+    for (const parameter of invocation.parameters) {
+      assert.equal(parameter.codec.schema.parse('payload'), 'payload')
+      assert.equal(parameter.codec.schema.safeParse(null).success, false)
+    }
+  }
+})
+
 test('host and client share one stable model-console invocation list', () => {
   assert.deepEqual(
     CONSOLE_INVOCATIONS.map((item) => item.method),

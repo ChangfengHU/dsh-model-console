@@ -1,6 +1,6 @@
 /** Shared Typert descriptors for the model-console host service. */
 
-import { z } from 'zod'
+import { string } from 'zod/mini'
 
 export const PKG = 'dsh-model-console'
 export const METHODS = [
@@ -15,14 +15,14 @@ function jsonParam(name: string) {
     name,
     wire: name,
     source: 'json',
-    codec: Object.freeze({ mode: 'strict', typeSymbol: `${PKG}/types#Json`, schema: z.string() }),
+    codec: Object.freeze({ mode: 'strict', typeSymbol: `${PKG}/types#Json`, schema: string() }),
   })
 }
 
 const JSON_RESULT = Object.freeze({
   mode: 'strict',
   typeSymbol: `${PKG}/types#Json`,
-  schema: z.string(),
+  schema: string(),
 })
 
 export const CONSOLE_INVOCATIONS = Object.freeze(

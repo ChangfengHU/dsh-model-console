@@ -52,6 +52,10 @@ Favorites and default refresh use narrow model-console operations, not unrestric
 
 ## Development
 
+Client builds use Zod Mini for the string-only RPC codecs and enforce a 120 KB
+uncompressed bundle budget. This avoids bundling the full multilingual validator
+runtime into the initial browser plugin graph.
+
 Build and test in the remote Linux source checkout. Reuse the installed DSH dependency runtime when appropriate; do not create extra databases, services or worktrees.
 
 ```sh
