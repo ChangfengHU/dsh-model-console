@@ -8,6 +8,8 @@ import { access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
@@ -37,6 +39,15 @@ async function command(executable: string, args: string[], timeoutMs: number): P
 /** Prefer the user's local Codex over an older system-wide binary. */
 export async function resolveCodexExecutable(configured: string): Promise<string> {
   if (configured !== 'codex') return configured
+  try {
+    const require = createRequire(import.meta.url)
+    const companion = await import(pathToFileURL(require.resolve('dsh-codex-claude-cli')).href)
+    if (typeof companion.codexCliEntry === 'function') {
+      const executable = companion.codexCliEntry()
+      await access(executable, constants.X_OK)
+      return executable
+    }
+  } catch {}
   const local = join(homedir(), '.local', 'bin', 'codex')
   try {
     await access(local, constants.X_OK)
@@ -64,7 +75,7 @@ export class ModelConsoleService extends TypertRemoteService {
           const models = await this.ctx.llm.listModels(provider.id)
           return {
             id: provider.id,
-            name: provider.name,
+            name: models.length && models.every(m => /^qwen(?:[-_.]|$)/i.test(m.id)) ? 'Qwen' : provider.name,
             models: await Promise.all(
               models.map(async (model) => {
                 const resolved = await this.ctx.llm
@@ -133,9 +144,8 @@ export class ModelConsoleService extends TypertRemoteService {
         await command(claudeExecutable, ['--version'], this.options.timeoutMs),
       )
       claudeInstalled = true
-      const status = JSON.parse(
-        await command(claudeExecutable, ['auth', 'status', '--json'], this.options.timeoutMs),
-      )
+      const authResult = await execute(claudeExecutable, ['auth', 'status', '--json'], { timeout: this.options.timeoutMs, maxBuffer: 64 * 1024, windowsHide: true })
+      const status = JSON.parse(authResult.stdout)
       authenticated = typeof status.loggedIn === 'boolean' ? status.loggedIn : null
     } catch {}
     const preferences = settings?.get(settingsNamespace('model-console')) as
@@ -179,9 +189,12 @@ export class ModelConsoleService extends TypertRemoteService {
       provider?: unknown
       model?: unknown
       reasoningEffort?: string
+      prompt?: unknown
     }
     const provider = typeof input.provider === 'string' ? input.provider.trim() : ''
     const model = typeof input.model === 'string' ? input.model.trim() : ''
+    const prompt = input.prompt === undefined ? 'What are three things to check before a day trip?' : input.prompt
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2000) throw new Error('Enter a short test message.')
     if (!provider || !model) throw new Error('provider and model are required')
     if (!this.ctx.llm.listProviders().some((item) => item.id === provider))
       throw new Error(`provider is not registered: ${provider}`)
@@ -200,10 +213,10 @@ export class ModelConsoleService extends TypertRemoteService {
         provider, model,
         ...(input.reasoningEffort ? { reasoningEffort: ReasoningEffortId(input.reasoningEffort) } : {}),
         messages: [createUserMessage({
-          content: [{ type: 'text', text: 'Reply with exactly: OK' }],
+          content: [{ type: 'text', text: prompt }],
           source: { kind: 'plugin', plugin: 'dsh-model-console' },
         })],
-        system: 'This is a connectivity test. Follow the user instruction exactly.',
+        system: 'Answer the user briefly in English. Do not access files or use tools.',
         tools: [], signal,
       }),
     )
@@ -241,5 +254,15 @@ export class ModelConsoleService extends TypertRemoteService {
         input.expectedRevision,
       ),
     )
+  }
+
+  async saveFavorites(payload: string): Promise<string> {
+    const input = JSON.parse(payload)
+    if (!Array.isArray(input.favoriteModels) || input.favoriteModels.length > 500 || input.favoriteModels.some((x: unknown) => typeof x !== 'string' || x.length > 400) || !Number.isInteger(input.expectedRevision)) throw new Error('Invalid model favorites.')
+    const settings = this.ctx.get('settings')
+    if (!settings?.writable) throw new Error('Model preferences are read-only.')
+    await settings.mutate(settingsNamespace('model-console'), [{ op: 'set', path: ['favoriteModels'], value: input.favoriteModels }], input.expectedRevision)
+    const value = settings.get(settingsNamespace('model-console')) as { favoriteModels: string[] }
+    return JSON.stringify({ favoriteModels: value.favoriteModels, revision: settings.describe().find(n => n.ns === 'model-console')!.revision, writable: true })
   }
 }

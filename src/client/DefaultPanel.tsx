@@ -107,11 +107,8 @@ export function DefaultPanel({
     savingRef.current = true
     setSaving(true)
     try {
-      const current = valueOf(await api.standard.settings.describe({})).namespaces.find(
-        (ns) => ns.ns === 'agent-default-model',
-      )
-      if (!current) throw new Error('默认模型设置尚未就绪')
-      setRevision(current.revision)
+      const current = await api.snapshot()
+      setRevision(current.defaultState.revision)
       await onSaved().catch(() => {})
       setMessage('已刷新保存版本；草稿保留，请核对后再次保存')
     } catch (cause) {

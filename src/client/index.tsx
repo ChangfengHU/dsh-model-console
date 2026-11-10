@@ -5,6 +5,7 @@ import { ModelConsoleSection, type ModelConsoleApi } from './ModelConsoleSection
 import { MODEL_CONSOLE_REMOTE, unwrap } from './remote.ts'
 import { installStyles } from './styles.ts'
 import { ModelPicker } from './ModelPicker.tsx'
+import { ApiModelsSection } from './ApiModelsSection.tsx'
 
 export const name = 'dsh-model-console'
 export const inject = ['slots', 'remote', 'connection']
@@ -13,6 +14,7 @@ export async function apply(ctx: any): Promise<void> {
   ctx.effect(() => installStyles(), 'model-console: stylesheet')
   await ctx.remote.$mount(MODEL_CONSOLE_REMOTE)
   const api: ModelConsoleApi = {
+    saveFavorites: async (favoriteModels, expectedRevision) => JSON.parse(unwrap<string>(await ctx.get('remote.modelConsole').saveFavorites(JSON.stringify({ favoriteModels, expectedRevision })))),
     snapshot: async () => {
       const result = await ctx.get('remote.modelConsole').snapshot()
       return JSON.parse(unwrap<string>(result)) as ModelConsoleSnapshot
@@ -31,6 +33,10 @@ export async function apply(ctx: any): Promise<void> {
     },
     standard: ctx.get('connection').api,
   }
+  ctx.slots.inject('settings.section', () => ctx.slots.register(
+    { name: 'settings.section', id: 'models', order: 10, priority: -20, label: 'Models' },
+    ApiModelsSection,
+  ))
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(
       {

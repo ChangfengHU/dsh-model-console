@@ -12,7 +12,7 @@ export async function measureModelTest(
   stream: (signal: AbortSignal) => AsyncIterable<TestChunk>,
 ): Promise<ModelTestResult> {
   const startedAt = Date.now(), controller = new AbortController()
-  let timedOut = false, firstTokenAt: number | undefined, textSeen = false
+  let timedOut = false, firstTokenAt: number | undefined, textSeen = false, output = ''
   let failure: { code: string; message: string } | undefined
   const timer = setTimeout(() => {
     timedOut = true
@@ -23,6 +23,7 @@ export async function measureModelTest(
       if (chunk.type === 'text-delta' && chunk.text) {
         firstTokenAt ??= Date.now()
         textSeen = true
+        output = (output + chunk.text).slice(0, 4000)
       }
       if (chunk.type === 'finish' && ['error', 'aborted'].includes(chunk.reason?.kind ?? '') && chunk.reason?.failure)
         failure = { code: chunk.reason.failure.code, message: chunk.reason.failure.message.slice(0, 300) }
@@ -38,6 +39,7 @@ export async function measureModelTest(
   return {
     ...selection, ok: !failure && textSeen, testedAt, durationMs: testedAt - startedAt,
     ...(firstTokenAt === undefined ? {} : { firstTokenMs: firstTokenAt - startedAt }),
+    ...(output ? { output } : {}),
     ...(!failure && textSeen ? {} : failure ?? { code: 'EMPTY_RESPONSE', message: 'Model returned no text' }),
   }
 }

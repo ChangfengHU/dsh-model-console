@@ -1,5 +1,7 @@
 # Mount only the management surface. Model transports remain owned by their
 # provider plugins, including dsh-codex-claude-cli and llm-pi-ai.
+- id: ui-settings-models
+  disabled: true
 - insert:
     - id: model-console
       name: dsh-model-console

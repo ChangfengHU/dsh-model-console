@@ -4,9 +4,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { ModelConsoleService } from './service.ts'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { ApiProfiles, profilesRpc, PROFILE_CHANNEL } from './api-profiles.ts'
 
 export const name = 'model-console'
-export const inject = ['llm', 'agentDefaultModel']
+export const inject = ['llm', 'agentDefaultModel', 'settings', 'credentials', 'connection']
 
 export interface Config {
   codexExecutable?: string
@@ -31,6 +32,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const executable = config.codexExecutable?.trim() || 'codex'
   const timeoutMs = config.statusTimeoutMs ?? 5000
   await ctx.plugin(ModelConsoleService, { executable, timeoutMs, testTimeoutMs: config.testTimeoutMs ?? 90000 })
+  const profiles = new ApiProfiles({ llm: ctx.llm, settings: ctx.settings, credentials: ctx.credentials })
+  ctx.connection.rpc.handle(PROFILE_CHANNEL, profilesRpc(profiles, payload => ctx.get('modelConsole').testModel(payload)), { authority: 'trusted-host' })
 }
 
 export { parseCodexLoginStatus, parseCodexVersion } from './auth.ts'

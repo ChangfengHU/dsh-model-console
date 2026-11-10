@@ -7,6 +7,7 @@ export const METHODS = [
   ['snapshot', 0],
   ['testModel', 1],
   ['saveDefault', 1],
+  ['saveFavorites', 1],
 ] as const
 
 function jsonParam(name: string) {
@@ -111,6 +112,7 @@ export interface ModelConsoleSnapshot {
 }
 
 export interface ModelTestResult {
+  output?: string
   ok: boolean
   provider: string
   model: string

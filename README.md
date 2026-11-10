@@ -1,44 +1,61 @@
-# dsh-model-console
+# DSH Model Console
 
-Model Console is the primary model management entry in DeepSeek Harness:
-**Settings → Model Console**.
+A small model-management plugin for DeepSeek Harness Web.
 
-Model transports remain owned by their provider plugins. Codex and Claude Code use their native local login; direct APIs and AG Account Pool use DSH Credentials.
+- **Settings > Models** manages configurable API sources such as Qwen and DeepSeek.
+- **Settings > Model Console** shows local Codex and Claude directories, executable paths and login state.
+- **Model Console > Default Settings** selects from every currently registered source, including API models.
 
-## Interface
+Model transports remain owned by provider plugins. This package never copies Claude/Codex authentication files.
 
-- **模型目录**: core, favorites, search, and all models. AG Pool Gemini effort variants appear as one model with an effort selector; exact submitted IDs remain unchanged. Older and unknown aliases remain accessible.
-- **接入来源**: local CLI login, direct API, and account-pool API. Each source shows registration, installation/login or credential status, directory state, endpoint when available, and the last explicit inference test.
-- **默认设置**: separates the saved selection from the draft. Save includes provider, exact model ID, reasoning effort, and expected settings revision; the host confirms persisted readback. Refresh preserves pending edits. Existing sessions keep their own selection.
-- The conversation model selector uses the same catalog projection and favorites, through the official shared ModelDirectory controller and session model-selection API.
-- Narrow content panels wrap controls using container queries. Styles follow the host theme without hiding or restyling external settings navigation.
+## Models
 
-## Codex and Claude Code
+The Models page reads the adapter-owned configurable-provider directory, not a hardcoded list of four model names.
+It shows configured endpoints, credential presence and references, and registered models. Stored API key values are never returned to the browser.
 
-Codex capabilities are directly editable in **Model Console → 接入来源 → Codex**: image generation, Web Search takeover, search model, and result count. The technical Codex App Server plugin card remains available and uses the exact same `llm-codex-app-server` settings namespace.
+A source can be edited and tested on the same page. Test content is editable, results show actual output, duration and a specific error code. Tests do not create a business conversation. A saved key is not proof of available credit: authentication, quota and network errors remain distinct.
 
-Claude Code has a separate source card with executable, work directory, timeout, model cache, retries, and native permission mode. Editable settings require a provider companion exposing `claude-code-runtime`; when absent the UI reports that settings are unavailable. The companion reads saved settings on the next call, invalidates model caches when relevant settings change, and preserves the accepted turn's settings.
+New API credentials receive independent DSH-managed references. Endpoint writes preserve unrelated profile fields and require the revision that the browser read. Failed saves only clean credentials created by that attempt after confirming they are unused; existing keys are not deleted.
 
-Native login status is projected without returning authentication files or tokens. A fallback directory containing default/opus/sonnet/haiku does **not** prove installation, login, quota, or successful inference.
+Base URL left empty retains an existing address or uses the provider adapter's default. Adding a source requires a configurable provider that the installed runtime actually supports.
 
-## API connections
+## Remote Access
 
-Existing Pi AI and official DeepSeek connections can be edited using their native settings namespaces. Endpoint changes preserve other profile fields. A new key gets a separate DSH credential reference before the profile is updated with a revision check; stored keys never appear in the form. Generic provider creation remains available in the native Models settings.
+The stock Models surface depends on loopback-only settings RPCs. This plugin's bundle explicitly disables only that stock UI entry and provides one replacement Models page. Removing the plugin restores normal composition. No official DSH installation files are edited.
 
-AG Pool local and remote instances are independent sources. The management link opens the appropriate pool; OAuth accounts, quotas, networking and fallback strategies remain managed there. A models directory is not a quota API. This version does not claim actual-route account/header metadata or session-wide affinity that the installed Pi adapter does not expose.
+The replacement uses the dedicated `/model-profiles` channel:
+- `sources`: API source metadata and key-presence flags, never key values.
+- `save`: writes endpoint/key fields only at the selected adapter-owned profile address.
+- `test`: tests a registered API model using a short prompt.
 
-Codex core models follow the first four visible entries in the native catalog order; the remaining entries stay under All Models. Its runtime supports an explicit current native CLI and an HTTP / Mixed network proxy configured in the shared Codex settings.
+There is no generic settings mutation, arbitrary credential access, or filesystem API on this channel. Native global settings RPC restrictions remain unchanged.
 
-Explicit tests use a configurable 90-second deadline and distinguish TEST_TIMEOUT from upstream quota errors. They send a minimal inference through the selected source and effort and do not create a chat Session. Results include target, time and latency; saved connection changes invalidate prior test results.
+The channel follows DSH's trusted-host admission and same-origin rules. Trusted-host admission is not user authentication; internet-facing deployments still need appropriate ingress authentication and authorization.
+
+## Native CLI Models
+
+The local catalog and source tabs show Codex/Claude only. The native source check uses the companion package's exported Codex executable resolver when available, then the user's local CLI fallback. Explicit executable configuration is respected.
+
+Installed, logged in, catalog loaded and inference tested are separate facts. A model appearing in a local cache does not prove that the account can invoke it. Claude's JSON auth status is parsed from stdout without combining diagnostic stderr into the JSON.
+
+Capability/permission changes remain owned by the provider plugins. The model console does not widen tool permissions or change login credentials.
+
+## Defaults And Favorites
+
+Default selection includes provider, exact model ID, optional reasoning effort and expected revision. The Host confirms persisted readback. Existing sessions retain their own selections.
+
+Favorites and default refresh use narrow model-console operations, not unrestricted browser settings RPCs. The chat model selector continues to use the runtime's ModelDirectory and session-selection API.
 
 ## Development
 
-```bash
-npm install
+Build and test in the remote Linux source checkout. Reuse the installed DSH dependency runtime when appropriate; do not create extra databases, services or worktrees.
+
+```sh
 npm test
 npm run build
+npm pack
 ```
 
-Install into a DSH profile and merge `cordis.patch.yml`. Restart after adding host services. The shipped web model-selection service supplies the official composer controller.
+Set `DSH_INSTALL_ROOT` to an existing DSH installation to run the installed-source compatibility test; otherwise that test is skipped.
 
-See [the UX design](docs/MODEL_CONSOLE_UX_PLAN.zh.md) and [local verification](docs/VERIFICATION.zh.md).
+MIT. [Source repository](https://github.com/ChangfengHU/dsh-model-console)

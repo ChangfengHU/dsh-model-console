@@ -42,9 +42,9 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
       if (run === generation.current) {
         setSnapshot(next)
         setSource((current) =>
-          next.providers.some((p) => p.id === current)
+          next.providers.some((p) => p.id === current && sourceKind(p) === '本机登录')
             ? current
-            : next.defaultModel.provider || next.providers[0]?.id || '',
+            : next.providers.find(p => p.id === next.defaultModel.provider && sourceKind(p) === '本机登录')?.id || next.providers.find(p => sourceKind(p) === '本机登录')?.id || '',
         )
       }
     } catch (cause) {
@@ -97,17 +97,8 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
       const next = snapshot.preferences.favoriteModels.includes(key)
         ? snapshot.preferences.favoriteModels.filter((k) => k !== key)
         : [...snapshot.preferences.favoriteModels, key]
-      valueOf(
-        await api.standard.settings.mutate({
-          ns: 'model-console',
-          expectedRevision: snapshot.preferences.revision,
-          ops: [{ op: 'set', path: ['favoriteModels'], value: next }],
-        }),
-      )
-      const after = valueOf(await api.standard.settings.describe({})).namespaces.find(
-        (n) => n.ns === 'model-console',
-      )
-      if (JSON.stringify(after?.value.favoriteModels) !== JSON.stringify(next))
+      const after = await api.saveFavorites(next, snapshot.preferences.revision)
+      if (JSON.stringify(after.favoriteModels) !== JSON.stringify(next))
         throw new Error('收藏保存未确认，请刷新后重试')
       setSnapshot((current) =>
         current
@@ -116,7 +107,7 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
               preferences: {
                 ...current.preferences,
                 favoriteModels: next,
-                revision: after!.revision,
+                revision: after.revision,
               },
             }
           : current,
@@ -158,7 +149,6 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
         <div>
           <div className="dmc-eyebrow">模型管理</div>
           <h2>Model Console</h2>
-          <p className="dmc-muted">统一管理接入来源、常用模型和新会话默认设置。</p>
         </div>
         <button disabled={loading} onClick={() => void refresh()}>
           {loading ? '刷新中…' : '刷新状态'}
@@ -172,24 +162,6 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
           </button>
         </p>
       ) : null}
-      <div className="dmc-summary">
-        <div>
-          <strong>3</strong>
-          <small>接入方式</small>
-        </div>
-        <div>
-          <strong>{snapshot?.providers.length ?? '—'}</strong>
-          <small>接入来源</small>
-        </div>
-        <div>
-          <strong>{coreCount || '—'}</strong>
-          <small>核心型号 · 池目录去重</small>
-        </div>
-        <div>
-          <strong>{rawCount || '—'}</strong>
-          <small>原始条目 · 含档位</small>
-        </div>
-      </div>
       <div className="dmc-tabs" role="tablist" aria-label="模型管理页面">
         {[
           ['catalog', '模型目录'],
@@ -229,7 +201,7 @@ export function ModelConsoleSection({ api }: { api: ModelConsoleApi }) {
                   value={source}
                   onChange={(e) => setSource(e.target.value)}
                 >
-                  {snapshot.providers.map((p) => (
+                  {snapshot.providers.filter(p => sourceKind(p) === '本机登录').map((p) => (
                     <option key={p.id} value={p.id}>
                       {sourceName(p)}
                     </option>

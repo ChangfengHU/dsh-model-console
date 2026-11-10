@@ -11,6 +11,7 @@ export interface Namespace {
 }
 export interface ModelConsoleApi {
   snapshot(): Promise<ModelConsoleSnapshot>
+  saveFavorites(favoriteModels: string[], expectedRevision: number): Promise<ModelConsoleSnapshot['preferences']>
   testModel(selection: Selection): Promise<ModelTestResult>
   saveDefault(
     selection: Selection,
