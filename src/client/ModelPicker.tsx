@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import {
   choiceFor,
@@ -10,8 +10,8 @@ import {
   selectionLabel,
   type Selection,
 } from '../catalog.ts'
-import type { ProviderRow } from '../wire.ts'
-import type { ModelConsoleApi } from './api.ts'
+import type { ProviderRow, RuntimeCatalog } from '../wire.ts'
+import { CATALOG_CHANGED, errorText, type ModelConsoleApi } from './api.ts'
 
 export function ModelPicker({
   locked,
@@ -39,15 +39,28 @@ export function ModelPicker({
     [favorites, setFavorites] = useState<string[]>([])
   const [position, setPosition] = useState({ left: 16, bottom: 80 }),
     [failure, setFailure] = useState('')
+  const [catalog, setCatalog] = useState<RuntimeCatalog | null>(null),
+    [catalogLoading, setCatalogLoading] = useState(false),
+    [catalogError, setCatalogError] = useState('')
+  const [switching, setSwitching] = useState(false), switchLock = useRef(false)
+  const generation = useRef(0), nativeLoad = useRef(load)
+  nativeLoad.current = load
+  const refreshCatalog = useCallback(async () => {
+    const id = ++generation.current
+    setCatalogLoading(true)
+    try {
+      const result = await api.catalog()
+      if (id === generation.current) { setCatalog(result); setFavorites(result.preferences.favoriteModels); setCatalogError('') }
+    } catch {
+      if (id === generation.current) setCatalogError('Could not refresh the configured model catalog. Retry before switching models.')
+    } finally { if (id === generation.current) setCatalogLoading(false) }
+  }, [api])
+  const refresh = useCallback(() => { nativeLoad.current(); void refreshCatalog() }, [refreshCatalog])
   const root = useRef<HTMLDivElement>(null),
     panel = useRef<HTMLDivElement>(null)
-  const providers: ProviderRow[] = state.groups.map((p: any) => ({
-    id: String(p.id),
-    name: p.name,
-    models: p.models.map((m: any) => ({ ...m, id: String(m.id) })),
-  }))
+  const providers: ProviderRow[] = catalog?.providers ?? []
   const current: Selection | null = state.current
-  const owner = current ? providers.find((p) => p.id === current.provider) : undefined
+  const owner = current ? providers.find((p) => p.id === current.provider) ?? state.groups.find((p: any) => p.id === current.provider) : undefined
   const active = owner && current ? choiceFor(owner, current) : undefined
   const provider = providers.find((p) => p.id === draft?.provider)
   const row = provider && draft ? choiceFor(provider, draft) : undefined
@@ -62,18 +75,23 @@ export function ModelPicker({
           (r.name + ' ' + r.id).toLowerCase().includes(search.toLowerCase()),
       )
     : []
-  const busy = state.status === 'selecting'
+  const busy = switching || state.status === 'selecting'
   const currentEffort = active && current ? effortOf(active, current) : ''
   const effortLabel = active?.efforts.find((e) => e.id === currentEffort)?.name ?? currentEffort
   useEffect(() => {
     if (open && !draft && state.current) setDraft(state.current)
   }, [open, draft, state.current])
   useEffect(() => {
-    if (available) load()
-    const refresh = () => { if (available) load() }
+    if (!available) return
+    refresh()
     window.addEventListener('dsh-model-console:default-saved', refresh)
-    return () => window.removeEventListener('dsh-model-console:default-saved', refresh)
-  }, [available, load])
+    window.addEventListener(CATALOG_CHANGED, refresh)
+    return () => {
+      generation.current++
+      window.removeEventListener('dsh-model-console:default-saved', refresh)
+      window.removeEventListener(CATALOG_CHANGED, refresh)
+    }
+  }, [available, refresh])
   useEffect(() => {
     if (!open) return
     const outside = (event: MouseEvent) => {
@@ -105,17 +123,18 @@ export function ModelPicker({
     setFailure('')
     setSearch('')
     setOpen(true)
-    load()
-    void api.snapshot()
-      .then(result => setFavorites(result.preferences.favoriteModels))
-      .catch(() => {})
+    refresh()
   }
   const apply = async () => {
-    if (!draft || busy) return
-    if (await select(draft)) {
-      setOpen(false)
-      root.current?.querySelector('button')?.focus()
-    } else setFailure(directory.getSnapshot().error ?? 'Model switch failed. Try again.')
+    if (!draft || busy || switchLock.current) return
+    switchLock.current = true; setSwitching(true); setFailure('')
+    try {
+      if (await select(draft)) {
+        setOpen(false)
+        root.current?.querySelector('button')?.focus()
+      } else setFailure(directory.getSnapshot().error ?? 'Model switch failed. Try again.')
+    } catch (cause) { setFailure(errorText(cause)) }
+    finally { switchLock.current = false; setSwitching(false) }
   }
   if (!available) return null
   return (
@@ -135,7 +154,7 @@ export function ModelPicker({
               <div
                 className="dmc-picker-panel"
                 ref={panel}
-                style={{ position: 'fixed', ...position }}
+                style={{ position: 'fixed', ...position, boxSizing: 'border-box', maxHeight: `min(560px, calc(100dvh - ${position.bottom + 12}px))` }}
                 role="dialog"
                 aria-label="Select session model"
                 onKeyDown={(event) => {
@@ -155,7 +174,8 @@ export function ModelPicker({
                       value={draft?.provider ?? ''}
                       disabled={busy}
                       onChange={(e) => {
-                        const p = providers.find((p) => p.id === e.target.value)!
+                        const p = providers.find((p) => p.id === e.target.value)
+                        if (!p) return
                         const r =
                           projectModels(p).find((r) => r.id === row?.id) ?? projectModels(p)[0]
                         if (r) setDraft(selectChoice(p.id, r))
@@ -165,7 +185,7 @@ export function ModelPicker({
                         <option value={draft.provider}>{draft.provider} (Current)</option>
                       ) : null}
                       {providers.map((p) => (
-                        <option key={p.id} value={p.id}>
+                        <option key={p.id} value={p.id} disabled={!p.models.length}>
                           {sourceName(p)}
                         </option>
                       ))}
@@ -213,7 +233,7 @@ export function ModelPicker({
                   <p className="dmc-muted">Current selection outside catalog: {draft.model}</p>
                 ) : null}
                 {!rows.length ? (
-                  <p className="dmc-muted">No matching models</p>
+                  <p className="dmc-muted">{catalogLoading ? 'Loading configured models…' : provider?.catalogError || 'No matching models'}</p>
                 ) : null}
                 {row?.efforts.length && draft ? (
                   <label className="dmc-field">
@@ -233,23 +253,23 @@ export function ModelPicker({
                     </select>
                   </label>
                 ) : null}
-                {state.error || failure ? (
+                {state.error || failure || catalogError ? (
                   <p className="dmc-error" role="alert">
-                    {failure || state.error}
+                    {catalogError || failure || state.error}
                   </p>
                 ) : null}
-                {state.failures.length ? (
+                {catalog?.providers.some(p => p.catalogError) ? (
                   <p className="dmc-muted">
-                    {state.failures.length} source catalogs failed to load
+                    {catalog.providers.filter(p => p.catalogError).length} source catalogs unavailable
                   </p>
                 ) : null}
                 <div className="dmc-actions">
-                  <button disabled={busy || state.status === 'loading'} onClick={load}>
-                    {state.status === 'loading' ? 'Refreshing…' : 'Refresh catalog'}
+                  <button disabled={busy || catalogLoading} onClick={refresh}>
+                    {catalogLoading ? 'Refreshing…' : 'Refresh catalog'}
                   </button>
                   <button
                     className="dmc-primary"
-                    disabled={!draft || busy || locked}
+                    disabled={!draft || !row || busy || locked || catalogLoading || !!catalogError}
                     onClick={() => void apply()}
                   >
                     {busy ? 'Switching…' : 'Apply'}

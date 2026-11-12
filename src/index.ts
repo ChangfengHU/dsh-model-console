@@ -31,8 +31,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   )
   const executable = config.codexExecutable?.trim() || 'codex'
   const timeoutMs = config.statusTimeoutMs ?? 5000
-  await ctx.plugin(ModelConsoleService, { executable, timeoutMs, testTimeoutMs: config.testTimeoutMs ?? 90000 })
   const profiles = new ApiProfiles({ llm: ctx.llm, settings: ctx.settings, credentials: ctx.credentials })
+  await ctx.plugin(ModelConsoleService, { executable, timeoutMs, testTimeoutMs: config.testTimeoutMs ?? 90000, catalog: () => profiles.catalog() })
   ctx.connection.rpc.handle(PROFILE_CHANNEL, profilesRpc(profiles, payload => ctx.get('modelConsole').testModel(payload)), { authority: 'trusted-host' })
 }
 

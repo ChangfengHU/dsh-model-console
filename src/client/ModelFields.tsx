@@ -23,14 +23,15 @@ export function ModelFields({
           aria-label="Source"
           value={value.provider}
           onChange={(e) => {
-            const p = providers.find((p) => p.id === e.target.value)!
+            const p = providers.find((p) => p.id === e.target.value)
+            if (!p) return
             const match = projectModels(p).find((r) => r.id === row?.id) ?? projectModels(p)[0]
             if (match) onChange(selectChoice(p.id, match, row ? effortOf(row, value) : undefined))
           }}
         >
           {!provider ? <option value={value.provider}>{value.provider} (Saved)</option> : null}
           {providers.map((p) => (
-            <option key={p.id} value={p.id}>
+            <option key={p.id} value={p.id} disabled={!p.models.length}>
               {sourceName(p)}
             </option>
           ))}

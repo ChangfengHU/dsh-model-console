@@ -6,6 +6,8 @@ import { MODEL_CONSOLE_REMOTE, unwrap } from './remote.ts'
 import { installStyles } from './styles.ts'
 import { ModelPicker } from './ModelPicker.tsx'
 import { ApiModelsSection } from './ApiModelsSection.tsx'
+import { CATALOG_CHANGED, profilesCall } from './api.ts'
+import { selectSessionModel } from './session-selection.ts'
 
 export const name = 'dsh-model-console'
 export const inject = ['slots', 'remote', 'connection']
@@ -14,7 +16,12 @@ export async function apply(ctx: any): Promise<void> {
   ctx.effect(() => installStyles(), 'model-console: stylesheet')
   await ctx.remote.$mount(MODEL_CONSOLE_REMOTE)
   const api: ModelConsoleApi = {
-    saveFavorites: async (favoriteModels, expectedRevision) => JSON.parse(unwrap<string>(await ctx.get('remote.modelConsole').saveFavorites(JSON.stringify({ favoriteModels, expectedRevision })))),
+    catalog: () => profilesCall('catalog'),
+    saveFavorites: async (favoriteModels, expectedRevision) => {
+      const saved = JSON.parse(unwrap<string>(await ctx.get('remote.modelConsole').saveFavorites(JSON.stringify({ favoriteModels, expectedRevision }))))
+      window.dispatchEvent(new Event(CATALOG_CHANGED))
+      return saved
+    },
     snapshot: async () => {
       const result = await ctx.get('remote.modelConsole').snapshot()
       return JSON.parse(unwrap<string>(result)) as ModelConsoleSnapshot
@@ -65,13 +72,14 @@ export async function apply(ctx: any): Promise<void> {
               load: () => {
                 if (available) void directory.load().catch(() => {})
               },
-              select: (selection: any) =>
-                available
-                  ? directory.select(selection).then(
-                      () => true,
-                      () => false,
-                    )
-                  : Promise.resolve(false),
+              select: async (selection: any) => {
+                if (!available) return false
+                await selectSessionModel(sessionId, selection, {
+                  selectModel: payload => api.standard.sessions.selectModel(payload),
+                  reload: () => directory.load(),
+                })
+                return true
+              },
             }
           },
         },

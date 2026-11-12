@@ -54,6 +54,12 @@ export interface ProviderRow {
   catalogError?: string
 }
 
+export interface RuntimeCatalog {
+  checkedAt: number
+  providers: ProviderRow[]
+  preferences: { favoriteModels: string[]; revision: number; writable: boolean }
+}
+
 export interface QwenRuntimeProjection {
   connected: boolean
   mode: 'dedicated' | 'compatible' | 'none'

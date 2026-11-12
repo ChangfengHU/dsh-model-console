@@ -2,6 +2,21 @@
 
 A small model-management plugin for DeepSeek Harness Web.
 
+## 0.4.4: One Configured Model Directory
+
+The session picker, Models API settings and Model Console now share the same
+live runtime directory and configured source labels. API sources and local
+Codex/Claude adapters are combined without a fixed source/model list. Legacy
+transport IDs remain unchanged, including Qwen configured on a historically
+DeepSeek-named route. Custom display names take precedence.
+
+Opening or refreshing the picker reloads this lightweight directory and saved
+favorites without executing CLI login checks or model test requests. API source,
+runtime and favorites saves notify the picker to refresh. The existing session
+selection service still validates and applies the exact provider/model IDs;
+global defaults and other sessions are not overwritten. Configured but inactive
+sources and failed catalogs remain explicitly unavailable.
+
 - **Settings > Models** manages configurable API sources such as Qwen and DeepSeek.
 - **Settings > Model Console** shows local Codex and Claude directories, executable paths and login state.
 - **Model Console > Default Settings** selects from every currently registered source, including API models.

@@ -1,15 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { errorText, timeText } from './api.ts'
+import { errorText, timeText, profilesCall } from './api.ts'
 
-export async function profilesCall(method: string, payload: Record<string, unknown> = {}) {
-  const response = await fetch('/model-profiles/' + method, {
-    method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'client-request', rpcId: crypto.randomUUID(), method, payload }),
-  })
-  const result = await response.json()
-  if (!response.ok || !result.result?.ok) throw new Error(result.result?.error?.message ?? 'API source request failed.')
-  return result.result.value
-}
 
 function SourceEditor({ source, refresh }: { source: any; refresh: () => Promise<void> }) {
   const [endpoint, setEndpoint] = useState(source.baseURL), [key, setKey] = useState('')

@@ -1,4 +1,4 @@
-import type { ModelConsoleSnapshot, ModelTestResult } from '../wire.ts'
+import type { ModelConsoleSnapshot, ModelTestResult, RuntimeCatalog } from '../wire.ts'
 import type { Selection } from '../catalog.ts'
 export interface RpcResult<T> {
   result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
@@ -10,6 +10,7 @@ export interface Namespace {
   revision: number
 }
 export interface ModelConsoleApi {
+  catalog(): Promise<RuntimeCatalog>
   snapshot(): Promise<ModelConsoleSnapshot>
   saveFavorites(favoriteModels: string[], expectedRevision: number): Promise<ModelConsoleSnapshot['preferences']>
   testModel(selection: Selection): Promise<ModelTestResult>
@@ -18,6 +19,9 @@ export interface ModelConsoleApi {
     revision: number,
   ): Promise<{ selection: Selection; revision: number; savedAt: number }>
   standard: {
+    sessions: {
+      selectModel(payload: Selection & { sessionId: string; persistDefault: false }): Promise<RpcResult<{ selected: Selection }>>
+    }
     settings: {
       describe(payload: {}): Promise<RpcResult<{ writable: boolean; namespaces: Namespace[] }>>
       mutate(payload: Record<string, unknown>): Promise<RpcResult<{ revision: number }>>
@@ -37,6 +41,18 @@ export interface ModelConsoleApi {
       ): Promise<RpcResult<{ models: Array<{ id: string }> }>>
     }
   }
+}
+
+export const CATALOG_CHANGED = 'dsh-model-console:catalog-changed'
+export async function profilesCall(method: string, payload: Record<string, unknown> = {}) {
+  const response = await fetch('/model-profiles/' + method, {
+    method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId: crypto.randomUUID(), method, payload }),
+  })
+  const result = await response.json()
+  if (!response.ok || !result.result?.ok) throw new Error(result.result?.error?.message ?? 'Model directory request failed.')
+  if (method === 'save') window.dispatchEvent(new Event(CATALOG_CHANGED))
+  return result.result.value
 }
 export function valueOf<T>(result: RpcResult<T>): T {
   if (!result.result.ok) throw new Error(result.result.error.message)

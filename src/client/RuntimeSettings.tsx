@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModelConsoleApi, Namespace } from './api.ts'
-import { valueOf, errorText, timeText } from './api.ts'
+import { valueOf, errorText, timeText, CATALOG_CHANGED } from './api.ts'
 const CODEX = 'llm-codex-app-server',
   CLAUDE = 'claude-code-runtime'
 export function RuntimeSettings({
@@ -103,6 +103,7 @@ export function RuntimeSettings({
       setDraft(current.value)
       setExpectedRevision(current.revision)
       setMessage('已保存并确认 · ' + timeText(Date.now()))
+      window.dispatchEvent(new Event(CATALOG_CHANGED))
       await onSaved().catch(() => {})
     } catch (cause) {
       setFailed(true)

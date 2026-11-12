@@ -16,7 +16,8 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { persistDefault } from './persistence.ts'
 import { parseCodexLoginStatus, parseCodexVersion } from './auth.ts'
-import type { ModelConsoleSnapshot, ProviderRow } from './wire.ts'
+import type { ModelConsoleSnapshot, RuntimeCatalog } from './wire.ts'
+import { readRuntimeCatalog } from './runtime-catalog.ts'
 import { measureModelTest } from './model-test.ts'
 
 const execute = promisify(execFile)
@@ -25,6 +26,7 @@ export interface ServiceOptions {
   executable: string
   timeoutMs: number
   testTimeoutMs?: number
+  catalog?: () => Promise<RuntimeCatalog>
 }
 
 async function command(executable: string, args: string[], timeoutMs: number): Promise<string> {
@@ -69,49 +71,8 @@ export class ModelConsoleService extends TypertRemoteService {
   }
 
   async snapshot(): Promise<string> {
-    const providers: ProviderRow[] = await Promise.all(
-      this.ctx.llm.listProviders().map(async (provider) => {
-        try {
-          const models = await this.ctx.llm.listModels(provider.id)
-          return {
-            id: provider.id,
-            name: models.length && models.every(m => /^qwen(?:[-_.]|$)/i.test(m.id)) ? 'Qwen' : provider.name,
-            models: await Promise.all(
-              models.map(async (model) => {
-                const resolved = await this.ctx.llm
-                  .resolveModelInfo(provider.id, model.id)
-                  .catch(() => undefined)
-                return {
-                  id: model.id,
-                  name: model.name,
-                  ...(model.description === undefined ? {} : { description: model.description }),
-                  ...(resolved?.reasoning
-                    ? {
-                        reasoning: {
-                          efforts: resolved.reasoning.efforts.map((e) => ({
-                            id: String(e.id),
-                            name: e.name,
-                          })),
-                          ...(resolved.reasoning.defaultEffort
-                            ? { defaultEffort: String(resolved.reasoning.defaultEffort) }
-                            : {}),
-                        },
-                      }
-                    : {}),
-                }
-              }),
-            ),
-          }
-        } catch {
-          return {
-            id: provider.id,
-            name: provider.name,
-            models: [],
-            catalogError: 'Model catalog unavailable',
-          }
-        }
-      }),
-    )
+    const catalog = this.options.catalog ? await this.options.catalog() : undefined
+    const providers = catalog?.providers ?? await readRuntimeCatalog(this.ctx.llm)
 
     const executable = await resolveCodexExecutable(this.options.executable)
     let installed = false

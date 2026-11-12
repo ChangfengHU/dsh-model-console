@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { providerName, readRuntimeCatalog, type SourceLabel } from './runtime-catalog.ts'
 
 export const PROFILE_CHANNEL = '/model-profiles'
 const forbidden = new Set(['__proto__', 'prototype', 'constructor'])
@@ -58,9 +59,8 @@ export class ApiProfiles {
       const ref = typeof profile.apiKeyEnv === 'string' ? profile.apiKeyEnv : ''
       const credential = ref ? await this.ports.credentials.describe(ref) : undefined
       const models = active.has(entry.provider) ? await this.ports.llm.listModels(entry.provider).catch(() => []) : []
-      const qwen = models.length > 0 && models.every((m: any) => /^qwen(?:[-_.]|$)/i.test(m.id))
       rows.push({
-        provider: entry.provider, name: qwen ? 'Qwen' : profile.displayName || entry.displayName,
+        provider: entry.provider, name: providerName({ id: entry.provider, name: entry.displayName }, models, { displayName: profile.displayName }),
         active: active.has(entry.provider), configured: entry.settingsPath.length === 0 || Object.keys(profile).length > 0,
         baseURL: publicEndpoint(profile.baseURL),
         credential: { configured: credential?.configured === true, writable: credential?.writable !== false, source: typeof credential?.source === 'string' ? credential.source : undefined, ref },
@@ -69,6 +69,22 @@ export class ApiProfiles {
       })
     }
     return { sources: rows }
+  }
+
+  async catalog() {
+    const labels = new Map<string, SourceLabel>()
+    const configured = new Set<string>()
+    for (const entry of this.entries()) {
+      try {
+        const { profile, exists } = this.locate(entry.provider)
+        labels.set(entry.provider, { displayName: profile.displayName, fallbackName: entry.displayName })
+        if (exists) configured.add(entry.provider)
+      } catch { /* Registered runtime sources remain visible if settings metadata is unavailable. */ }
+    }
+    const providers = await readRuntimeCatalog(this.ports.llm, labels)
+    for (const id of configured) if (!providers.some(p => p.id === id)) providers.push({ id, name: providerName({ id }, [], labels.get(id)), models: [], catalogError: 'Configured source is not registered in the runtime' })
+    const preferences = this.ports.settings.get(settingsNamespace('model-console')) as { favoriteModels?: string[] } | undefined
+    return { checkedAt: Date.now(), providers, preferences: { favoriteModels: preferences?.favoriteModels ?? [], revision: this.ports.settings.describe().find((n: any) => n.ns === 'model-console')?.revision ?? 0, writable: this.ports.settings.writable === true } }
   }
 
   save(input: any) {
@@ -112,6 +128,7 @@ export function profilesRpc(profiles: ApiProfiles, testModel: (payload: string) 
     try {
       if (!payload || typeof payload !== 'object' || Array.isArray(payload) || JSON.stringify(payload).length > 20000) throw invalid('Invalid API profile request.')
       if (method === 'sources') return { ok: true, value: await profiles.sources() }
+      if (method === 'catalog') return { ok: true, value: await profiles.catalog() }
       if (method === 'save') return { ok: true, value: await profiles.save(payload) }
       if (method === 'test') {
         const sources = await profiles.sources()
